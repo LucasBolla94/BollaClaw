@@ -82,15 +82,15 @@ export interface ProvidersConfig {
 
 // Known OpenAI-compatible base URLs for convenience
 const KNOWN_BASES: Record<string, { baseUrl: string; defaultModel: string }> = {
-  openai:     { baseUrl: 'https://api.openai.com/v1',       defaultModel: 'gpt-4o' },
-  deepseek:   { baseUrl: 'https://api.deepseek.com/v1',     defaultModel: 'deepseek-chat' },
-  groq:       { baseUrl: 'https://api.groq.com/openai/v1',  defaultModel: 'llama-3.3-70b-versatile' },
-  openrouter: { baseUrl: 'https://openrouter.ai/api/v1',    defaultModel: 'anthropic/claude-3.5-sonnet' },
-  together:   { baseUrl: 'https://api.together.xyz/v1',     defaultModel: 'meta-llama/Llama-3.3-70B-Instruct-Turbo' },
+  openai:     { baseUrl: 'https://api.openai.com/v1',            defaultModel: 'gpt-5.4' },
+  deepseek:   { baseUrl: 'https://api.deepseek.com/v1',          defaultModel: 'deepseek-chat' },
+  groq:       { baseUrl: 'https://api.groq.com/openai/v1',       defaultModel: 'llama-3.3-70b-versatile' },
+  openrouter: { baseUrl: 'https://openrouter.ai/api/v1',         defaultModel: 'anthropic/claude-opus-4-6' },
+  together:   { baseUrl: 'https://api.together.xyz/v1',          defaultModel: 'meta-llama/Llama-3.3-70B-Instruct-Turbo' },
   fireworks:  { baseUrl: 'https://api.fireworks.ai/inference/v1', defaultModel: 'accounts/fireworks/models/llama-v3p3-70b-instruct' },
-  xai:        { baseUrl: 'https://api.x.ai/v1',             defaultModel: 'grok-2' },
-  mistral:    { baseUrl: 'https://api.mistral.ai/v1',       defaultModel: 'mistral-large-latest' },
-  cerebras:   { baseUrl: 'https://api.cerebras.ai/v1',      defaultModel: 'llama-3.3-70b' },
+  xai:        { baseUrl: 'https://api.x.ai/v1',                  defaultModel: 'grok-4' },
+  mistral:    { baseUrl: 'https://api.mistral.ai/v1',            defaultModel: 'mistral-large-latest' },
+  cerebras:   { baseUrl: 'https://api.cerebras.ai/v1',           defaultModel: 'llama-3.3-70b' },
 };
 
 /**
@@ -159,83 +159,81 @@ export function loadProvidersConfig(): ProvidersConfig {
  */
 function buildFromEnv(): ProvidersConfig {
   const providers: Record<string, ProviderEntry> = {};
-  const defaultProvider = process.env.LLM_PROVIDER ?? 'claude';
+  const llmProvider = process.env.LLM_PROVIDER ?? 'anthropic';
+  const llmModel = process.env.LLM_MODEL ?? '';
+  const llmBaseUrl = process.env.LLM_BASE_URL ?? '';
 
-  // Anthropic
-  if (process.env.ANTHROPIC_API_KEY) {
-    providers.claude = {
-      type: 'anthropic',
-      apiKey: process.env.ANTHROPIC_API_KEY,
-      model: process.env.ANTHROPIC_MODEL ?? 'claude-sonnet-4-5',
+  // ── Map LLM_PROVIDER → provider type + base URL ──
+  const PROVIDER_MAP: Record<string, { type: ProviderType; baseUrl?: string; defaultModel: string; envKey: string }> = {
+    anthropic:   { type: 'anthropic',          defaultModel: 'claude-sonnet-4-6', envKey: 'ANTHROPIC_API_KEY' },
+    claude:      { type: 'anthropic',          defaultModel: 'claude-sonnet-4-6', envKey: 'ANTHROPIC_API_KEY' },
+    openai:      { type: 'openai-compatible',  baseUrl: 'https://api.openai.com/v1',      defaultModel: 'gpt-5.4',        envKey: 'OPENAI_API_KEY' },
+    xai:         { type: 'openai-compatible',  baseUrl: 'https://api.x.ai/v1',            defaultModel: 'grok-4',         envKey: 'XAI_API_KEY' },
+    grok:        { type: 'openai-compatible',  baseUrl: 'https://api.x.ai/v1',            defaultModel: 'grok-4',         envKey: 'XAI_API_KEY' },
+    openrouter:  { type: 'openai-compatible',  baseUrl: 'https://openrouter.ai/api/v1',   defaultModel: 'anthropic/claude-opus-4-6', envKey: 'OPENROUTER_API_KEY' },
+    deepseek:    { type: 'openai-compatible',  baseUrl: 'https://api.deepseek.com/v1',    defaultModel: 'deepseek-chat',  envKey: 'DEEPSEEK_API_KEY' },
+    groq:        { type: 'openai-compatible',  baseUrl: 'https://api.groq.com/openai/v1', defaultModel: 'llama-3.3-70b-versatile', envKey: 'GROQ_API_KEY' },
+    gemini:      { type: 'gemini',             defaultModel: 'gemini-2.5-flash',           envKey: 'GEMINI_API_KEY' },
+  };
+
+  // ── Register PRIMARY provider from wizard settings ──
+  const primaryMapping = PROVIDER_MAP[llmProvider] ?? PROVIDER_MAP.anthropic;
+  const primaryApiKey = process.env[primaryMapping.envKey] ?? '';
+
+  if (primaryApiKey) {
+    const primaryEntry: ProviderEntry = {
+      type: primaryMapping.type,
+      apiKey: primaryApiKey,
+      model: llmModel || primaryMapping.defaultModel,
     };
+    if (llmBaseUrl) {
+      primaryEntry.baseUrl = llmBaseUrl;
+    } else if (primaryMapping.baseUrl) {
+      primaryEntry.baseUrl = primaryMapping.baseUrl;
+    }
+    if (llmProvider === 'openrouter') {
+      primaryEntry.headers = { 'HTTP-Referer': 'https://bollaclaw.bolla.network' };
+    }
+    providers[llmProvider] = primaryEntry;
   }
 
-  // Gemini
-  if (process.env.GEMINI_API_KEY) {
-    providers.gemini = {
-      type: 'gemini',
-      apiKey: process.env.GEMINI_API_KEY,
-      model: process.env.GEMINI_MODEL ?? 'gemini-2.0-flash',
+  // ── Register FALLBACK providers (any extra API keys) ──
+  const fallbackDefs: Array<{ name: string; envKey: string; type: ProviderType; baseUrl?: string; defaultModel: string }> = [
+    { name: 'anthropic',  envKey: 'ANTHROPIC_API_KEY',   type: 'anthropic',         defaultModel: 'claude-sonnet-4-6' },
+    { name: 'openai',     envKey: 'OPENAI_API_KEY',      type: 'openai-compatible', baseUrl: 'https://api.openai.com/v1',      defaultModel: 'gpt-5.4' },
+    { name: 'xai',        envKey: 'XAI_API_KEY',         type: 'openai-compatible', baseUrl: 'https://api.x.ai/v1',            defaultModel: 'grok-4' },
+    { name: 'openrouter', envKey: 'OPENROUTER_API_KEY',  type: 'openai-compatible', baseUrl: 'https://openrouter.ai/api/v1',   defaultModel: 'anthropic/claude-opus-4-6' },
+    { name: 'gemini',     envKey: 'GEMINI_API_KEY',      type: 'gemini',            defaultModel: 'gemini-2.5-flash' },
+    { name: 'deepseek',   envKey: 'DEEPSEEK_API_KEY',    type: 'openai-compatible', baseUrl: 'https://api.deepseek.com/v1',    defaultModel: 'deepseek-chat' },
+    { name: 'groq',       envKey: 'GROQ_API_KEY',        type: 'openai-compatible', baseUrl: 'https://api.groq.com/openai/v1', defaultModel: 'llama-3.3-70b-versatile' },
+  ];
+
+  for (const def of fallbackDefs) {
+    if (providers[def.name]) continue; // Already registered as primary
+    const key = process.env[def.envKey];
+    if (!key) continue;
+
+    const entry: ProviderEntry = {
+      type: def.type,
+      apiKey: key,
+      model: def.defaultModel,
     };
+    if (def.baseUrl) entry.baseUrl = def.baseUrl;
+    if (def.name === 'openrouter') {
+      entry.headers = { 'HTTP-Referer': 'https://bollaclaw.bolla.network' };
+    }
+    providers[def.name] = entry;
   }
 
-  // DeepSeek
-  if (process.env.DEEPSEEK_API_KEY) {
-    providers.deepseek = {
-      type: 'openai-compatible',
-      apiKey: process.env.DEEPSEEK_API_KEY,
-      model: process.env.DEEPSEEK_MODEL ?? 'deepseek-chat',
-      baseUrl: 'https://api.deepseek.com/v1',
-    };
-  }
+  logger.info(`Built ${Object.keys(providers).length} providers from .env (primary: ${llmProvider})`);
 
-  // Groq
-  if (process.env.GROQ_API_KEY) {
-    providers.groq = {
-      type: 'openai-compatible',
-      apiKey: process.env.GROQ_API_KEY,
-      model: process.env.GROQ_MODEL ?? 'llama-3.3-70b-versatile',
-      baseUrl: 'https://api.groq.com/openai/v1',
-    };
-  }
-
-  // OpenRouter
-  if (process.env.OPENROUTER_API_KEY) {
-    providers.openrouter = {
-      type: 'openai-compatible',
-      apiKey: process.env.OPENROUTER_API_KEY,
-      model: process.env.OPENROUTER_MODEL ?? 'anthropic/claude-3.5-sonnet',
-      baseUrl: 'https://openrouter.ai/api/v1',
-      headers: { 'HTTP-Referer': 'https://bollaclaw.bolla.network' },
-    };
-  }
-
-  // OpenAI
-  if (process.env.OPENAI_API_KEY) {
-    providers.openai = {
-      type: 'openai-compatible',
-      apiKey: process.env.OPENAI_API_KEY,
-      model: process.env.OPENAI_MODEL ?? 'gpt-4o',
-      baseUrl: 'https://api.openai.com/v1',
-    };
-  }
-
-  // xAI / Grok
-  if (process.env.XAI_API_KEY) {
-    providers.grok = {
-      type: 'openai-compatible',
-      apiKey: process.env.XAI_API_KEY,
-      model: process.env.XAI_MODEL ?? 'grok-2',
-      baseUrl: 'https://api.x.ai/v1',
-    };
-  }
-
-  logger.info(`Built ${Object.keys(providers).length} providers from .env (legacy mode)`);
+  // Build fallback order: primary → all others
+  const fallbackOrder = Object.keys(providers).filter(n => n !== llmProvider);
 
   return {
-    default: defaultProvider,
-    router: process.env.ROUTER_PROVIDER ?? 'groq',
-    fallbackOrder: (process.env.FALLBACK_ORDER ?? '').split(',').map(s => s.trim()).filter(Boolean),
+    default: llmProvider,
+    router: providers.groq ? 'groq' : llmProvider,
+    fallbackOrder,
     providers,
   };
 }
