@@ -1,15 +1,17 @@
 import { GoogleGenerativeAI, FunctionDeclaration, Tool } from '@google/generative-ai';
 import { ILlmProvider, Message, ToolDefinition, LlmResponse, ToolCall } from './ILlmProvider';
+import { ProviderEntry } from './ProviderConfig';
 import { logger } from '../utils/logger';
 
 export class GeminiProvider implements ILlmProvider {
-  public readonly name = 'gemini';
+  public readonly name: string;
   private client: GoogleGenerativeAI;
   private model: string;
 
-  constructor(apiKey: string, model = 'gemini-1.5-flash') {
-    this.client = new GoogleGenerativeAI(apiKey);
-    this.model = model;
+  constructor(providerName: string, entry: ProviderEntry) {
+    this.name = providerName;
+    this.model = entry.model || 'gemini-2.0-flash';
+    this.client = new GoogleGenerativeAI(entry.apiKey);
   }
 
   async complete(messages: Message[], tools?: ToolDefinition[]): Promise<LlmResponse> {
@@ -70,7 +72,7 @@ export class GeminiProvider implements ILlmProvider {
         isFinished: true,
       };
     } catch (error) {
-      logger.error(`Gemini API error: ${error}`);
+      logger.error(`[${this.name}] Gemini API error: ${error}`);
       throw error;
     }
   }

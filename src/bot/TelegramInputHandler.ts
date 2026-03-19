@@ -68,7 +68,8 @@ export class TelegramInputHandler {
       const status = this.controller.getStatus();
       const msg = [
         `🟢 *BollaClaw Status*`,
-        `Provider: \`${status.provider}\``,
+        `Provider: \`${status.defaultProvider}\``,
+        `Models: ${status.providers.map((p) => `${p.name}(${p.model})`).join(', ')}`,
         `Skills: ${status.skills.length} (${status.skills.map((s) => s.name).join(', ') || 'none'})`,
         `Tools: ${status.tools.join(', ')}`,
       ].join('\n');

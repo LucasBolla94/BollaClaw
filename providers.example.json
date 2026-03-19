@@ -1,0 +1,73 @@
+{
+  "default": "claude",
+  "router": "groq",
+  "fallbackOrder": ["claude", "openrouter", "groq"],
+
+  "providers": {
+    "claude": {
+      "type": "anthropic",
+      "apiKey": "${ANTHROPIC_API_KEY}",
+      "model": "claude-sonnet-4-5",
+      "maxTokens": 8192
+    },
+
+    "groq": {
+      "type": "openai-compatible",
+      "apiKey": "${GROQ_API_KEY}",
+      "model": "llama-3.3-70b-versatile",
+      "baseUrl": "https://api.groq.com/openai/v1"
+    },
+
+    "openrouter": {
+      "type": "openai-compatible",
+      "apiKey": "${OPENROUTER_API_KEY}",
+      "model": "anthropic/claude-3.5-sonnet",
+      "baseUrl": "https://openrouter.ai/api/v1",
+      "headers": {
+        "HTTP-Referer": "https://bollaclaw.bolla.network",
+        "X-Title": "BollaClaw"
+      }
+    },
+
+    "gpt4": {
+      "type": "openai-compatible",
+      "apiKey": "${OPENAI_API_KEY}",
+      "model": "gpt-4o",
+      "baseUrl": "https://api.openai.com/v1"
+    },
+
+    "deepseek": {
+      "type": "openai-compatible",
+      "apiKey": "${DEEPSEEK_API_KEY}",
+      "model": "deepseek-chat",
+      "baseUrl": "https://api.deepseek.com/v1"
+    },
+
+    "grok": {
+      "type": "openai-compatible",
+      "apiKey": "${XAI_API_KEY}",
+      "model": "grok-2",
+      "baseUrl": "https://api.x.ai/v1"
+    },
+
+    "gemini": {
+      "type": "gemini",
+      "apiKey": "${GEMINI_API_KEY}",
+      "model": "gemini-2.0-flash"
+    },
+
+    "mistral": {
+      "type": "openai-compatible",
+      "apiKey": "${MISTRAL_API_KEY}",
+      "model": "mistral-large-latest",
+      "baseUrl": "https://api.mistral.ai/v1"
+    },
+
+    "together": {
+      "type": "openai-compatible",
+      "apiKey": "${TOGETHER_API_KEY}",
+      "model": "meta-llama/Llama-3.3-70B-Instruct-Turbo",
+      "baseUrl": "https://api.together.xyz/v1"
+    }
+  }
+}

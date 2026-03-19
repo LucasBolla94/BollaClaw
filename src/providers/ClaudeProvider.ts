@@ -1,15 +1,19 @@
 import Anthropic from '@anthropic-ai/sdk';
 import { ILlmProvider, Message, ToolDefinition, LlmResponse, ToolCall } from './ILlmProvider';
+import { ProviderEntry } from './ProviderConfig';
 import { logger } from '../utils/logger';
 
 export class ClaudeProvider implements ILlmProvider {
-  public readonly name = 'claude';
+  public readonly name: string;
   private client: Anthropic;
   private model: string;
+  private maxTokens: number;
 
-  constructor(apiKey: string, model = 'claude-sonnet-4-5') {
-    this.client = new Anthropic({ apiKey });
-    this.model = model;
+  constructor(providerName: string, entry: ProviderEntry) {
+    this.name = providerName;
+    this.model = entry.model || 'claude-sonnet-4-5';
+    this.maxTokens = entry.maxTokens ?? 8192;
+    this.client = new Anthropic({ apiKey: entry.apiKey });
   }
 
   async complete(messages: Message[], tools?: ToolDefinition[]): Promise<LlmResponse> {
@@ -31,7 +35,7 @@ export class ClaudeProvider implements ILlmProvider {
     try {
       const response = await this.client.messages.create({
         model: this.model,
-        max_tokens: 8192,
+        max_tokens: this.maxTokens,
         system: systemPrompt || undefined,
         messages: anthropicMessages,
         tools: anthropicTools,
@@ -58,7 +62,7 @@ export class ClaudeProvider implements ILlmProvider {
         isFinished: response.stop_reason === 'end_turn' || response.stop_reason === 'max_tokens',
       };
     } catch (error) {
-      logger.error(`Claude API error: ${error}`);
+      logger.error(`[${this.name}] Claude API error: ${error}`);
       throw error;
     }
   }

@@ -21,12 +21,17 @@ export const config = {
       .map((id) => id.trim())
       .filter(Boolean),
   },
+  // Legacy LLM config — still used as fallback if providers.json doesn't exist
   llm: {
-    provider: optionalEnv('LLM_PROVIDER', 'claude') as 'claude' | 'gemini' | 'deepseek' | 'groq',
+    provider: optionalEnv('LLM_PROVIDER', 'claude'),
+    routerProvider: optionalEnv('ROUTER_PROVIDER', 'groq'),
     anthropicApiKey: optionalEnv('ANTHROPIC_API_KEY', ''),
     geminiApiKey: optionalEnv('GEMINI_API_KEY', ''),
     deepseekApiKey: optionalEnv('DEEPSEEK_API_KEY', ''),
     groqApiKey: optionalEnv('GROQ_API_KEY', ''),
+    openaiApiKey: optionalEnv('OPENAI_API_KEY', ''),
+    openrouterApiKey: optionalEnv('OPENROUTER_API_KEY', ''),
+    xaiApiKey: optionalEnv('XAI_API_KEY', ''),
   },
   agent: {
     maxIterations: parseInt(optionalEnv('MAX_ITERATIONS', '5'), 10),

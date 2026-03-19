@@ -26,7 +26,7 @@ async function main() {
     logger.info(`Agent: ${identity.agentName} | Owner: ${identity.ownerName || '(not set)'}`);
   }
 
-  logger.info(`Provider: ${config.llm.provider}`);
+  logger.info(`LLM Provider: ${config.llm.provider} (providers.json or .env)`);
   logger.info(`STT: ${config.audio.sttProvider}`);
   logger.info(`Admin: ${config.admin.enabled ? `http://0.0.0.0:${config.admin.port}` : 'disabled'}`);
   logger.info(`Allowed users: ${config.telegram.allowedUserIds.join(', ')}`);

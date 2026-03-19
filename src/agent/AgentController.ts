@@ -29,6 +29,12 @@ export class AgentController {
   }
 
   async initialize(): Promise<void> {
+    // Load providers config
+    const providersConfig = ProviderFactory.loadConfig();
+    const providerList = ProviderFactory.listProviders();
+    logger.info(`Providers loaded: ${providerList.map(p => `${p.name}(${p.type}:${p.model})`).join(', ')}`);
+    logger.info(`Default provider: ${providersConfig.default} | Router: ${providersConfig.router ?? 'default'}`);
+
     // Load identity (onboard config)
     this.identity = this.onboardManager.loadIdentity();
     if (this.identity.ownerName) {
@@ -44,14 +50,10 @@ export class AgentController {
     logger.info(`AgentController ready. Skills: ${this.skills.length}, Tools: ${this.toolRegistry.listNames().join(', ')}`);
   }
 
-  /**
-   * Load all skills and register their custom tools in the ToolRegistry
-   */
   private async loadAndRegisterSkills(): Promise<void> {
     this.skills = this.skillLoader.loadAll();
 
     for (const skill of this.skills) {
-      // Register custom tools defined by the skill
       if (skill.tools.length > 0) {
         for (const toolDef of skill.tools) {
           const scriptTool = new ScriptTool(toolDef, skill.dirPath);
@@ -60,12 +62,10 @@ export class AgentController {
         }
       }
 
-      // Install dependencies if needed (runs once)
       if (skill.dependencies) {
         const depsCheck = await this.skillExecutor.checkDependencies(skill);
         if (!depsCheck.ok) {
           logger.warn(`Skill ${skill.name} has missing dependencies: ${depsCheck.missing.join(', ')}`);
-          // Auto-install on first load
           await this.skillLoader.installDependencies(skill);
         }
       }
@@ -93,9 +93,9 @@ Data/hora atual: ${now}`;
     if (!this.isReady) await this.initialize();
 
     const provider = ProviderFactory.create();
-    const providerName = config.llm.provider;
+    const providerName = ProviderFactory.getDefaultName();
 
-    captureLog('info', `Processing message from ${userId}: "${userMessage.substring(0, 80)}"`);
+    captureLog('info', `Processing [${providerName}] from ${userId}: "${userMessage.substring(0, 80)}"`);
 
     // Prepare conversation context
     const { conversationId, messages } = this.memoryManager.prepareContext(
@@ -107,14 +107,19 @@ Data/hora atual: ${now}`;
     // Build system prompt from identity
     let systemPrompt = this.getSystemPrompt();
 
-    // Route to skill if applicable
+    // Route to skill if applicable (uses router provider — cheap/fast)
     if (this.skills.length > 0) {
-      const router = new SkillRouter(ProviderFactory.create('groq') ?? provider);
-      const skill = await router.route(userMessage, this.skills);
+      try {
+        const routerProvider = ProviderFactory.createRouter();
+        const router = new SkillRouter(routerProvider);
+        const skill = await router.route(userMessage, this.skills);
 
-      if (skill) {
-        systemPrompt = this.buildSkillPrompt(systemPrompt, skill);
-        logger.info(`Using skill: ${skill.name} (executable: ${skill.isExecutable})`);
+        if (skill) {
+          systemPrompt = this.buildSkillPrompt(systemPrompt, skill);
+          logger.info(`Using skill: ${skill.name} (executable: ${skill.isExecutable})`);
+        }
+      } catch (err) {
+        logger.warn(`Skill routing failed (using no skill): ${err}`);
       }
     }
 
@@ -124,9 +129,18 @@ Data/hora atual: ${now}`;
       systemPrompt += `\n\nFerramentas disponíveis: ${toolNames.join(', ')}`;
     }
 
-    // Run agent loop
-    const loop = new AgentLoop(provider, this.toolRegistry);
-    const result = await loop.run(messages, systemPrompt, requiresAudioReply);
+    // Run agent loop (with fallback if primary provider fails)
+    let result: AgentResult;
+    try {
+      const loop = new AgentLoop(provider, this.toolRegistry);
+      result = await loop.run(messages, systemPrompt, requiresAudioReply);
+    } catch (err) {
+      logger.warn(`Primary provider failed, trying fallback: ${err}`);
+      result = await ProviderFactory.withFallback(async (fallbackProvider) => {
+        const loop = new AgentLoop(fallbackProvider, this.toolRegistry);
+        return loop.run(messages, systemPrompt, requiresAudioReply);
+      });
+    }
 
     // Persist response
     this.memoryManager.saveAssistantReply(conversationId, result.answer);
@@ -134,16 +148,10 @@ Data/hora atual: ${now}`;
     return result;
   }
 
-  /**
-   * Build the enhanced system prompt when a skill is active
-   */
   private buildSkillPrompt(basePrompt: string, skill: Skill): string {
     let prompt = `${basePrompt}\n\n## Skill Ativa: ${skill.name}\n`;
-
-    // Inject skill instructions
     prompt += skill.content;
 
-    // If skill is executable, tell the agent about its capabilities
     if (skill.isExecutable) {
       prompt += `\n\n### Execução\n`;
       prompt += `Esta skill tem scripts executáveis (runtime: ${skill.runtime ?? 'auto'}).\n`;
@@ -165,7 +173,6 @@ Data/hora atual: ${now}`;
   }
 
   reloadSkills(): void {
-    // Unregister old skill tools (keep only built-in)
     const builtinTools = ['create_file', 'read_file', 'get_datetime'];
     const currentTools = this.toolRegistry.listNames();
     for (const toolName of currentTools) {
@@ -174,10 +181,15 @@ Data/hora atual: ${now}`;
       }
     }
 
-    // Reload and re-register
     this.loadAndRegisterSkills().then(() => {
       logger.info(`Skills reloaded: ${this.skills.length}`);
     });
+  }
+
+  reloadProviders(): void {
+    ProviderFactory.loadConfig();
+    const providers = ProviderFactory.listProviders();
+    logger.info(`Providers reloaded: ${providers.map(p => p.name).join(', ')}`);
   }
 
   reloadIdentity(): void {
@@ -186,9 +198,11 @@ Data/hora atual: ${now}`;
   }
 
   getStatus() {
+    const providers = ProviderFactory.listProviders();
     return {
       ready: this.isReady,
-      provider: config.llm.provider,
+      defaultProvider: ProviderFactory.getDefaultName(),
+      providers: providers,
       agentName: this.identity?.agentName ?? 'BollaClaw',
       owner: this.identity?.ownerName ?? '(not configured)',
       skills: this.skills.map((s) => ({
