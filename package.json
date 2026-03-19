@@ -1,0 +1,41 @@
+{
+  "name": "bollaclaw",
+  "version": "0.1.0",
+  "description": "BollaClaw - Personal AI Agent via Telegram, running on Ubuntu server",
+  "main": "dist/main.js",
+  "scripts": {
+    "dev": "nodemon --exec ts-node src/main.ts",
+    "build": "tsc",
+    "start": "node dist/main.js",
+    "pm2:start": "pm2 start ecosystem.config.js",
+    "pm2:stop": "pm2 stop bollaclaw",
+    "pm2:restart": "pm2 restart bollaclaw",
+    "pm2:logs": "pm2 logs bollaclaw"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.30.0",
+    "@google/generative-ai": "^0.21.0",
+    "better-sqlite3": "^11.0.0",
+    "dotenv": "^16.4.5",
+    "express": "^4.19.2",
+    "grammy": "^1.27.0",
+    "groq-sdk": "^0.7.0",
+    "js-yaml": "^4.1.0",
+    "openai": "^4.68.0",
+    "pdf-parse": "^1.1.1",
+    "systeminformation": "^5.23.5",
+    "uuid": "^10.0.0",
+    "winston": "^3.15.0"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "^7.6.11",
+    "@types/express": "^4.17.21",
+    "@types/js-yaml": "^4.0.9",
+    "@types/node": "^22.0.0",
+    "@types/pdf-parse": "^1.1.4",
+    "@types/uuid": "^10.0.0",
+    "nodemon": "^3.1.4",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.5.4"
+  }
+}

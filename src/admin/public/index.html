@@ -1,0 +1,198 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>BollaClaw Admin</title>
+  <style>
+    :root {
+      --bg: #0d1117; --surface: #161b22; --border: #30363d;
+      --text: #e6edf3; --muted: #8b949e; --green: #3fb950;
+      --blue: #58a6ff; --yellow: #d29922; --red: #f85149;
+      --accent: #1f6feb;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { background: var(--bg); color: var(--text); font-family: 'Segoe UI', system-ui, sans-serif; font-size: 14px; }
+    header { background: var(--surface); border-bottom: 1px solid var(--border); padding: 12px 24px; display: flex; align-items: center; gap: 12px; }
+    header h1 { font-size: 18px; font-weight: 600; }
+    .badge { background: var(--green); color: #000; font-size: 11px; padding: 2px 8px; border-radius: 12px; font-weight: 700; }
+    .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 16px; padding: 20px 24px; }
+    .card { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 16px; }
+    .card h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .5px; color: var(--muted); margin-bottom: 12px; }
+    .stat { display: flex; justify-content: space-between; align-items: center; padding: 6px 0; border-bottom: 1px solid var(--border); }
+    .stat:last-child { border: none; }
+    .stat-value { font-weight: 600; color: var(--blue); }
+    .tag { display: inline-block; background: var(--accent); color: #fff; border-radius: 4px; padding: 2px 8px; font-size: 12px; margin: 2px; }
+    .log-box { background: #010409; border: 1px solid var(--border); border-radius: 6px; padding: 12px; height: 280px; overflow-y: auto; font-family: monospace; font-size: 12px; line-height: 1.6; }
+    .log-info { color: var(--green); }
+    .log-warn { color: var(--yellow); }
+    .log-error { color: var(--red); }
+    .log-debug { color: var(--muted); }
+    .full-width { grid-column: 1 / -1; }
+    .btn { background: var(--accent); color: #fff; border: none; border-radius: 6px; padding: 8px 16px; cursor: pointer; font-size: 13px; margin-top: 8px; }
+    .btn:hover { opacity: .85; }
+    .btn-red { background: #b91c1c; }
+    .skills-list { display: flex; flex-wrap: wrap; gap: 6px; }
+    .status-dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; margin-right: 6px; }
+    .dot-green { background: var(--green); }
+    #loginScreen { display: flex; align-items: center; justify-content: center; min-height: 100vh; flex-direction: column; gap: 16px; }
+    #loginScreen input { background: var(--surface); border: 1px solid var(--border); color: var(--text); border-radius: 6px; padding: 10px 14px; font-size: 14px; width: 260px; }
+    #loginScreen button { width: 260px; padding: 10px; font-size: 14px; }
+    #app { display: none; }
+  </style>
+</head>
+<body>
+
+<div id="loginScreen">
+  <h2>🤖 BollaClaw Admin</h2>
+  <input type="password" id="pwdInput" placeholder="Password" onkeydown="if(event.key==='Enter')login()">
+  <button class="btn" onclick="login()">Entrar</button>
+  <p id="loginError" style="color:var(--red);font-size:12px"></p>
+</div>
+
+<div id="app">
+  <header>
+    <span>🤖</span>
+    <h1>BollaClaw Admin</h1>
+    <span class="badge" id="statusBadge">ONLINE</span>
+    <span style="margin-left:auto;color:var(--muted);font-size:12px" id="lastUpdate"></span>
+  </header>
+
+  <div class="grid">
+    <!-- System Info -->
+    <div class="card">
+      <h2>Sistema</h2>
+      <div class="stat"><span>CPU Usage</span><span class="stat-value" id="cpu">—</span></div>
+      <div class="stat"><span>RAM Usage</span><span class="stat-value" id="ram">—</span></div>
+      <div class="stat"><span>Uptime</span><span class="stat-value" id="uptime">—</span></div>
+      <div class="stat"><span>Node.js</span><span class="stat-value" id="nodeVer">—</span></div>
+    </div>
+
+    <!-- Bot Config -->
+    <div class="card">
+      <h2>Configuração</h2>
+      <div class="stat"><span>LLM Provider</span><span class="stat-value" id="provider">—</span></div>
+      <div class="stat"><span>STT Provider</span><span class="stat-value" id="sttProvider">—</span></div>
+      <div class="stat"><span>Max Iterations</span><span class="stat-value" id="maxIter">—</span></div>
+      <div class="stat"><span>Memory Window</span><span class="stat-value" id="memWindow">—</span></div>
+    </div>
+
+    <!-- Skills -->
+    <div class="card">
+      <h2>Skills Ativas</h2>
+      <div class="skills-list" id="skillsList"><span style="color:var(--muted)">Loading...</span></div>
+      <button class="btn" onclick="reloadSkills()" style="margin-top:12px">🔄 Reload Skills</button>
+    </div>
+
+    <!-- Tools -->
+    <div class="card">
+      <h2>Ferramentas</h2>
+      <div class="skills-list" id="toolsList"><span style="color:var(--muted)">Loading...</span></div>
+    </div>
+
+    <!-- Logs -->
+    <div class="card full-width">
+      <h2>Logs em Tempo Real</h2>
+      <div class="log-box" id="logBox"></div>
+      <button class="btn" onclick="clearLogs()" style="margin-top:8px">Limpar</button>
+    </div>
+  </div>
+</div>
+
+<script>
+let token = localStorage.getItem('bc_token') || '';
+let autoScroll = true;
+
+function login() {
+  const pwd = document.getElementById('pwdInput').value;
+  fetch('/api/login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ password: pwd }) })
+    .then(r => r.json()).then(d => {
+      if (d.token) {
+        token = d.token;
+        localStorage.setItem('bc_token', token);
+        document.getElementById('loginScreen').style.display = 'none';
+        document.getElementById('app').style.display = 'block';
+        startPolling();
+      } else {
+        document.getElementById('loginError').textContent = 'Senha incorreta';
+      }
+    });
+}
+
+function api(path) {
+  return fetch(path, { headers: { Authorization: 'Bearer ' + token } }).then(r => {
+    if (r.status === 401) { token = ''; localStorage.removeItem('bc_token'); location.reload(); }
+    return r.json();
+  });
+}
+
+function startPolling() {
+  fetchStatus();
+  fetchLogs();
+  setInterval(fetchStatus, 5000);
+  setInterval(fetchLogs, 3000);
+}
+
+function fetchStatus() {
+  api('/api/status').then(d => {
+    document.getElementById('cpu').textContent = d.system?.cpu ?? '—';
+    document.getElementById('ram').textContent = d.system?.ram ?? '—';
+    document.getElementById('uptime').textContent = d.system?.uptime ?? '—';
+    document.getElementById('nodeVer').textContent = d.system?.node ?? '—';
+    document.getElementById('provider').textContent = d.agent?.provider ?? '—';
+    document.getElementById('sttProvider').textContent = d.config?.stt ?? '—';
+    document.getElementById('maxIter').textContent = d.config?.maxIter ?? '—';
+    document.getElementById('memWindow').textContent = d.config?.memWindow ?? '—';
+
+    const skillsList = document.getElementById('skillsList');
+    if (d.agent?.skills?.length) {
+      skillsList.innerHTML = d.agent.skills.map(s => `<span class="tag" title="${s.description}">${s.name}</span>`).join('');
+    } else {
+      skillsList.innerHTML = '<span style="color:var(--muted)">Nenhuma skill carregada</span>';
+    }
+
+    const toolsList = document.getElementById('toolsList');
+    toolsList.innerHTML = (d.agent?.tools ?? []).map(t => `<span class="tag">${t}</span>`).join('');
+
+    document.getElementById('lastUpdate').textContent = 'Atualizado: ' + new Date().toLocaleTimeString('pt-BR');
+  }).catch(() => {});
+}
+
+function fetchLogs() {
+  api('/api/logs').then(d => {
+    const box = document.getElementById('logBox');
+    box.innerHTML = (d.logs ?? []).map(l => {
+      const cls = 'log-' + (l.level || 'info');
+      const time = new Date(l.timestamp).toLocaleTimeString('pt-BR');
+      return `<div class="${cls}">[${time}] [${l.level?.toUpperCase()}] ${escHtml(l.message)}</div>`;
+    }).join('');
+    if (autoScroll) box.scrollTop = box.scrollHeight;
+  }).catch(() => {});
+}
+
+function reloadSkills() {
+  api('/api/reload-skills').then(() => { fetchStatus(); });
+}
+
+function clearLogs() {
+  api('/api/clear-logs');
+  document.getElementById('logBox').innerHTML = '';
+}
+
+function escHtml(s) {
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+
+// Check existing token
+if (token) {
+  fetch('/api/status', { headers: { Authorization: 'Bearer ' + token } }).then(r => {
+    if (r.ok) {
+      document.getElementById('loginScreen').style.display = 'none';
+      document.getElementById('app').style.display = 'block';
+      startPolling();
+    }
+  });
+}
+</script>
+</body>
+</html>

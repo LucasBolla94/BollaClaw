@@ -1,0 +1,18 @@
+[Unit]
+Description=BollaClaw - Personal AI Agent via Telegram
+After=network.target
+
+[Service]
+Type=simple
+User=ubuntu
+WorkingDirectory=/home/ubuntu/bollaclaw
+ExecStart=/usr/bin/node /home/ubuntu/bollaclaw/dist/main.js
+Restart=on-failure
+RestartSec=10
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=bollaclaw
+Environment=NODE_ENV=production
+
+[Install]
+WantedBy=multi-user.target
