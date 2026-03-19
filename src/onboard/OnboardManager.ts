@@ -1,7 +1,8 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import * as readline from 'readline';
-import { logger } from '../utils/logger';
+// NOTE: Do NOT import logger here — logger imports config which requires
+// .env to exist. OnboardManager runs BEFORE .env is created.
 
 export interface IdentityConfig {
   agentName: string;
@@ -52,17 +53,17 @@ export class OnboardManager {
    */
   loadIdentity(): IdentityConfig {
     if (!this.isOnboarded()) {
-      logger.warn('Identity not found, using defaults');
+      console.warn('Identity not found, using defaults');
       return { ...DEFAULT_IDENTITY };
     }
 
     try {
       const raw = fs.readFileSync(this.identityPath, 'utf-8');
       const data = JSON.parse(raw) as IdentityConfig;
-      logger.info(`Identity loaded: ${data.agentName} (owner: ${data.ownerName})`);
+      console.log(`Identity loaded: ${data.agentName} (owner: ${data.ownerName})`);
       return data;
     } catch (err) {
-      logger.error(`Failed to load identity: ${err}`);
+      console.error(`Failed to load identity: ${err}`);
       return { ...DEFAULT_IDENTITY };
     }
   }
@@ -76,7 +77,7 @@ export class OnboardManager {
       fs.mkdirSync(dir, { recursive: true });
     }
     fs.writeFileSync(this.identityPath, JSON.stringify(identity, null, 2), 'utf-8');
-    logger.info(`Identity saved: ${identity.agentName}`);
+    console.log(`Identity saved: ${identity.agentName}`);
   }
 
   /**
