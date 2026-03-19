@@ -5,6 +5,7 @@ import { startAdminServer } from './admin/AdminServer';
 import { OnboardManager } from './onboard/OnboardManager';
 import { config } from './utils/config';
 import { logger, captureLog } from './utils/logger';
+import { telemetry } from './telemetry/TelemetryReporter';
 
 // Ensure required directories exist
 [config.paths.data, config.paths.tmp, config.paths.logs, './output'].forEach((dir) => {
@@ -32,6 +33,9 @@ async function main() {
   logger.info(`Allowed users: ${config.telegram.allowedUserIds.join(', ')}`);
   captureLog('info', 'BollaClaw starting...');
 
+  // Start telemetry reporter
+  telemetry.start();
+
   const bot = new TelegramInputHandler();
 
   // Start admin panel with reference to controller
@@ -53,11 +57,13 @@ async function main() {
   process.on('uncaughtException', (err) => {
     logger.error(`Uncaught exception: ${err.message}\n${err.stack}`);
     captureLog('error', `Uncaught exception: ${err.message}`);
+    telemetry.trackError(err, 'uncaught_exception');
   });
 
   process.on('unhandledRejection', (reason) => {
     logger.error(`Unhandled rejection: ${reason}`);
     captureLog('error', `Unhandled rejection: ${reason}`);
+    telemetry.trackError(String(reason), 'unhandled_rejection');
   });
 
   // Start the bot

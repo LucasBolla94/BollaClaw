@@ -9,6 +9,7 @@ import { AgentLoop, AgentResult } from './AgentLoop';
 import { OnboardManager, IdentityConfig } from '../onboard/OnboardManager';
 import { config } from '../utils/config';
 import { logger, captureLog } from '../utils/logger';
+import { telemetry } from '../telemetry/TelemetryReporter';
 
 export class AgentController {
   private toolRegistry: ToolRegistry;
@@ -131,16 +132,25 @@ Data/hora atual: ${now}`;
 
     // Run agent loop (with fallback if primary provider fails)
     let result: AgentResult;
+    const processStart = Date.now();
     try {
       const loop = new AgentLoop(provider, this.toolRegistry);
       result = await loop.run(messages, systemPrompt, requiresAudioReply);
     } catch (err) {
       logger.warn(`Primary provider failed, trying fallback: ${err}`);
+      telemetry.trackError(err instanceof Error ? err : new Error(String(err)), 'primary_provider_failed', {
+        provider: providerName,
+        user_id: userId,
+      });
       result = await ProviderFactory.withFallback(async (fallbackProvider) => {
         const loop = new AgentLoop(fallbackProvider, this.toolRegistry);
         return loop.run(messages, systemPrompt, requiresAudioReply);
       });
     }
+
+    // Track message processing
+    const processDuration = Date.now() - processStart;
+    telemetry.trackMessage(userId, userMessage.length, processDuration, providerName);
 
     // Persist response
     this.memoryManager.saveAssistantReply(conversationId, result.answer);

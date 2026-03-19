@@ -449,6 +449,12 @@ LOGS_DIR=./logs
 
 # ─── Logging ───
 LOG_LEVEL=info
+
+# ─── Telemetry (BollaWatch) ───
+# Set the URL of your BollaWatch server to enable telemetry reporting.
+# Leave empty to disable telemetry.
+# Example: http://server2.bolla.network:21087
+BOLLAWATCH_URL=
 `;
 
   fs.writeFileSync(ENV_FILE, envContent, 'utf-8');
