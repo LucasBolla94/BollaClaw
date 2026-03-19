@@ -50,6 +50,30 @@ echo -e "${CYAN}╚════════════════════�
 echo ""
 
 # ============================================================
+# [0/8] Kill existing BollaClaw
+# ============================================================
+echo -e "${BOLD}[0/8]${NC} Verificando instância existente..."
+
+# Stop PM2 process if running
+if command -v pm2 &> /dev/null; then
+  if pm2 describe bollaclaw &> /dev/null; then
+    run_silent "Parando BollaClaw via PM2" pm2 delete bollaclaw
+  else
+    echo -e "  Nenhuma instância PM2 encontrada              ${GREEN}✓${NC}"
+  fi
+else
+  echo -e "  PM2 não instalado (primeira instalação)        ${GREEN}✓${NC}"
+fi
+
+# Kill any orphaned node processes running BollaClaw
+BOLLACLAW_PIDS=$(pgrep -f "node.*bollaclaw" 2>/dev/null || true)
+if [ -n "$BOLLACLAW_PIDS" ]; then
+  run_silent "Matando processos órfãos" bash -c "echo '$BOLLACLAW_PIDS' | xargs kill -9 2>/dev/null || true"
+else
+  echo -e "  Nenhum processo órfão encontrado               ${GREEN}✓${NC}"
+fi
+
+# ============================================================
 # Check Ubuntu/Debian
 # ============================================================
 if ! command -v apt &> /dev/null; then
@@ -58,17 +82,18 @@ if ! command -v apt &> /dev/null; then
 fi
 
 # ============================================================
-# [1/7] System Update
+# [1/8] System Update
 # ============================================================
-echo -e "${BOLD}[1/7]${NC} Atualizando sistema..."
+echo ""
+echo -e "${BOLD}[1/8]${NC} Atualizando sistema..."
 run_silent "Atualizando lista de pacotes" sudo apt update -qq
 run_silent "Aplicando atualizações" sudo apt upgrade -y -qq
 
 # ============================================================
-# [2/7] Install Node.js 20 LTS
+# [2/8] Install Node.js 20 LTS
 # ============================================================
 echo ""
-echo -e "${BOLD}[2/7]${NC} Node.js 20 LTS..."
+echo -e "${BOLD}[2/8]${NC} Node.js 20 LTS..."
 if command -v node &> /dev/null; then
   NODE_VER=$(node --version | cut -d'v' -f2 | cut -d'.' -f1)
   if [ "$NODE_VER" -ge 20 ]; then
@@ -84,10 +109,10 @@ fi
 echo -e "  Node: ${GREEN}$(node --version)${NC} | npm: ${GREEN}$(npm --version)${NC}"
 
 # ============================================================
-# [3/7] Install PM2
+# [3/8] Install PM2
 # ============================================================
 echo ""
-echo -e "${BOLD}[3/7]${NC} PM2 (Process Manager)..."
+echo -e "${BOLD}[3/8]${NC} PM2 (Process Manager)..."
 if command -v pm2 &> /dev/null; then
   echo -e "  PM2 $(pm2 --version) já instalado                  ${GREEN}✓${NC}"
 else
@@ -95,10 +120,10 @@ else
 fi
 
 # ============================================================
-# [4/7] Install system dependencies
+# [4/8] Install system dependencies
 # ============================================================
 echo ""
-echo -e "${BOLD}[4/7]${NC} Dependências de sistema..."
+echo -e "${BOLD}[4/8]${NC} Dependências de sistema..."
 run_silent "build-essential + python3 + ffmpeg" sudo apt install -y -qq build-essential python3 python3-pip ffmpeg
 
 if command -v python3 &> /dev/null; then
@@ -108,10 +133,10 @@ else
 fi
 
 # ============================================================
-# [5/7] Clone or Update Repository
+# [5/8] Clone or Update Repository
 # ============================================================
 echo ""
-echo -e "${BOLD}[5/7]${NC} Repositório BollaClaw..."
+echo -e "${BOLD}[5/8]${NC} Repositório BollaClaw..."
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd || echo "")"
 if [ -n "$SCRIPT_DIR" ] && [ -f "$SCRIPT_DIR/../package.json" ]; then
@@ -137,10 +162,10 @@ else
 fi
 
 # ============================================================
-# [6/7] Install Dependencies + Build
+# [6/8] Install Dependencies + Build
 # ============================================================
 echo ""
-echo -e "${BOLD}[6/7]${NC} Compilando BollaClaw..."
+echo -e "${BOLD}[6/8]${NC} Compilando BollaClaw..."
 run_silent "npm install" npm install --production=false --silent
 run_silent "TypeScript build" npm run build
 
@@ -149,12 +174,26 @@ mkdir -p data tmp logs output .agents/skills
 
 echo ""
 echo -e "  ${GREEN}✓ Instalação de dependências completa!${NC}"
-echo ""
 
 # ============================================================
-# [7/7] Interactive Setup Wizard
+# [7/8] Install bollaclaw CLI globally
 # ============================================================
-echo -e "${BOLD}[7/7]${NC} Configuração interativa..."
+echo ""
+echo -e "${BOLD}[7/8]${NC} Instalando CLI 'bollaclaw'..."
+
+# Make the CLI executable
+chmod +x dist/bin/bollaclaw.js 2>/dev/null || true
+
+# Create global symlink so 'bollaclaw' works from anywhere
+run_silent "Registrando comando 'bollaclaw'" sudo npm link --silent
+
+echo -e "  Comando ${CYAN}bollaclaw${NC} disponível globalmente         ${GREEN}✓${NC}"
+
+# ============================================================
+# [8/8] Interactive Setup Wizard
+# ============================================================
+echo ""
+echo -e "${BOLD}[8/8]${NC} Configuração interativa..."
 echo ""
 
 if [ ! -f ".env" ]; then
@@ -189,9 +228,6 @@ fi
 echo ""
 echo -e "  ${BOLD}Iniciando serviço...${NC}"
 
-# Stop existing instance
-pm2 delete bollaclaw >> "$LOG_FILE" 2>&1 || true
-
 run_silent "Iniciando BollaClaw via PM2" pm2 start ecosystem.config.js
 run_silent "Salvando processo PM2" pm2 save
 
@@ -215,16 +251,26 @@ echo -e "${GREEN}╠════════════════════
 echo -e "${GREEN}║${NC}                                              ${GREEN}║${NC}"
 echo -e "${GREEN}║${NC}  Diretório: ${CYAN}${INSTALL_DIR}${NC}"
 echo -e "${GREEN}║${NC}                                              ${GREEN}║${NC}"
-echo -e "${GREEN}║${NC}  ${BOLD}Comandos úteis:${NC}                             ${GREEN}║${NC}"
-echo -e "${GREEN}║${NC}    pm2 logs bollaclaw     — Ver logs          ${GREEN}║${NC}"
-echo -e "${GREEN}║${NC}    pm2 restart bollaclaw  — Reiniciar         ${GREEN}║${NC}"
+echo -e "${GREEN}║${NC}  ${BOLD}Comandos BollaClaw CLI:${NC}                      ${GREEN}║${NC}"
+echo -e "${GREEN}║${NC}    bollaclaw status        — Status do bot   ${GREEN}║${NC}"
+echo -e "${GREEN}║${NC}    bollaclaw add <CODE>    — Aprovar usuário ${GREEN}║${NC}"
+echo -e "${GREEN}║${NC}    bollaclaw users         — Listar usuários ${GREEN}║${NC}"
+echo -e "${GREEN}║${NC}    bollaclaw pending       — Pendentes       ${GREEN}║${NC}"
+echo -e "${GREEN}║${NC}    bollaclaw restart       — Reiniciar       ${GREEN}║${NC}"
+echo -e "${GREEN}║${NC}    bollaclaw logs          — Ver logs        ${GREEN}║${NC}"
+echo -e "${GREEN}║${NC}    bollaclaw help          — Todos comandos  ${GREEN}║${NC}"
+echo -e "${GREEN}║${NC}                                              ${GREEN}║${NC}"
+echo -e "${GREEN}║${NC}  ${BOLD}PM2 shortcuts:${NC}                              ${GREEN}║${NC}"
 echo -e "${GREEN}║${NC}    pm2 monit              — Monitor ao vivo   ${GREEN}║${NC}"
-echo -e "${GREEN}║${NC}    npm run onboard        — Reconfigurar      ${GREEN}║${NC}"
 echo -e "${GREEN}║${NC}                                              ${GREEN}║${NC}"
 echo -e "${GREEN}║${NC}  O bot reinicia automaticamente:              ${GREEN}║${NC}"
 echo -e "${GREEN}║${NC}    ✓ Crash → PM2 reinicia                    ${GREEN}║${NC}"
 echo -e "${GREEN}║${NC}    ✓ Reboot → systemd + PM2                  ${GREEN}║${NC}"
 echo -e "${GREEN}║${NC}    ✓ Memória > 512MB → PM2 reinicia          ${GREEN}║${NC}"
+echo -e "${GREEN}║${NC}                                              ${GREEN}║${NC}"
+echo -e "${GREEN}║${NC}  ${BOLD}Novo sistema de aprovação:${NC}                   ${GREEN}║${NC}"
+echo -e "${GREEN}║${NC}    Mande mensagem ao bot → receba um código  ${GREEN}║${NC}"
+echo -e "${GREEN}║${NC}    Admin roda: bollaclaw add <CODE>           ${GREEN}║${NC}"
 echo -e "${GREEN}║${NC}                                              ${GREEN}║${NC}"
 echo -e "${GREEN}╚══════════════════════════════════════════════╝${NC}"
 echo ""

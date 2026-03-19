@@ -43,7 +43,7 @@ export class AgentLoop {
 
       logger.debug(`[AgentLoop] Response - content: ${response.content?.substring(0, 100)}..., toolCalls: ${response.toolCalls.length}`);
 
-      // No tool calls → final answer
+      // No tool calls -> final answer
       if (response.toolCalls.length === 0) {
         const answer = response.content ?? 'I could not generate a response.';
         logger.info(`[AgentLoop] Final answer reached at iteration ${iteration}`);
@@ -51,10 +51,14 @@ export class AgentLoop {
         return this.parseResult(answer, requiresAudioReply);
       }
 
-      // Add assistant message with tool calls
-      if (response.content) {
-        workingMessages.push({ role: 'assistant', content: response.content });
-      }
+      // Add assistant message WITH tool call metadata
+      // This is critical for Anthropic's tool_use protocol: the assistant message
+      // must carry the tool_use blocks so ClaudeProvider can reconstruct them.
+      workingMessages.push({
+        role: 'assistant',
+        content: response.content ?? '',
+        _toolUseCalls: response.toolCalls,
+      });
 
       // Execute each tool call
       for (const toolCall of response.toolCalls) {
@@ -81,7 +85,7 @@ export class AgentLoop {
 
         workingMessages.push({
           role: 'tool',
-          content: `Tool "${toolCall.name}" result: ${observation}`,
+          content: observation,
           tool_call_id: toolCall.id,
           name: toolCall.name,
         });

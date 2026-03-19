@@ -1,4 +1,4 @@
-import { GoogleGenerativeAI, FunctionDeclaration, Tool } from '@google/generative-ai';
+import { GoogleGenerativeAI, FunctionDeclaration, Tool, Part } from '@google/generative-ai';
 import { ILlmProvider, Message, ToolDefinition, LlmResponse, ToolCall } from './ILlmProvider';
 import { ProviderEntry } from './ProviderConfig';
 import { logger } from '../utils/logger';
@@ -37,16 +37,17 @@ export class GeminiProvider implements ILlmProvider {
       tools: geminiTools,
     });
 
-    const history = chatMessages.slice(0, -1).map((m) => ({
-      role: m.role === 'assistant' ? 'model' : 'user',
-      parts: [{ text: m.content }],
-    }));
+    // Build history with proper function call/response handling
+    const history = this.buildGeminiHistory(chatMessages.slice(0, -1));
 
     const lastMessage = chatMessages[chatMessages.length - 1];
     const chat = genModel.startChat({ history });
 
+    // Build the last message parts
+    const lastParts = this.buildMessageParts(lastMessage);
+
     try {
-      const result = await chat.sendMessage(lastMessage?.content ?? '');
+      const result = await chat.sendMessage(lastParts);
       const response = result.response;
 
       const toolCalls: ToolCall[] = [];
@@ -58,7 +59,7 @@ export class GeminiProvider implements ILlmProvider {
             textContent += part.text;
           } else if (part.functionCall) {
             toolCalls.push({
-              id: `gemini-${Date.now()}`,
+              id: `gemini-${Date.now()}-${Math.random().toString(36).substring(2, 8)}`,
               name: part.functionCall.name,
               arguments: part.functionCall.args as Record<string, unknown>,
             });
@@ -75,5 +76,81 @@ export class GeminiProvider implements ILlmProvider {
       logger.error(`[${this.name}] Gemini API error: ${error}`);
       throw error;
     }
+  }
+
+  /**
+   * Build Gemini history with proper function call/response parts
+   */
+  private buildGeminiHistory(messages: Message[]): Array<{ role: string; parts: Part[] }> {
+    const history: Array<{ role: string; parts: Part[] }> = [];
+
+    for (const msg of messages) {
+      if (msg.role === 'assistant') {
+        const parts: Part[] = [];
+
+        if (msg.content) {
+          parts.push({ text: msg.content });
+        }
+
+        // If assistant had tool calls, add functionCall parts
+        if (msg._toolUseCalls && msg._toolUseCalls.length > 0) {
+          for (const tc of msg._toolUseCalls) {
+            parts.push({
+              functionCall: {
+                name: tc.name,
+                args: tc.arguments,
+              },
+            } as Part);
+          }
+        }
+
+        if (parts.length > 0) {
+          history.push({ role: 'model', parts });
+        }
+
+      } else if (msg.role === 'tool') {
+        // Tool results -> functionResponse part in a 'function' role message
+        // Gemini expects function responses grouped together
+        const lastEntry = history[history.length - 1];
+        const responsePart: Part = {
+          functionResponse: {
+            name: msg.name ?? 'unknown',
+            response: { result: msg.content },
+          },
+        } as Part;
+
+        // If last history entry is already a function role, append to it
+        if (lastEntry && lastEntry.role === 'function') {
+          lastEntry.parts.push(responsePart);
+        } else {
+          history.push({ role: 'function', parts: [responsePart] });
+        }
+
+      } else {
+        // User message
+        history.push({
+          role: 'user',
+          parts: [{ text: msg.content }],
+        });
+      }
+    }
+
+    return history;
+  }
+
+  /**
+   * Build parts for a single message (used for the last message sent to chat)
+   */
+  private buildMessageParts(msg: Message): Part[] | string {
+    if (msg.role === 'tool') {
+      return [{
+        functionResponse: {
+          name: msg.name ?? 'unknown',
+          response: { result: msg.content },
+        },
+      } as Part];
+    }
+
+    return msg.content ?? '';
   }
 }

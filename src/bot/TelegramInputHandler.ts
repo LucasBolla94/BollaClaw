@@ -3,6 +3,7 @@ import { AgentController } from '../agent/AgentController';
 import { TelegramOutputHandler } from './TelegramOutputHandler';
 import { DocumentHandler } from '../handlers/DocumentHandler';
 import { AudioHandler } from '../handlers/AudioHandler';
+import { UserManager } from '../auth/UserManager';
 import { config } from '../utils/config';
 import { logger, captureLog, logBuffer } from '../utils/logger';
 
@@ -12,7 +13,7 @@ export class TelegramInputHandler {
   private output: TelegramOutputHandler;
   private documentHandler: DocumentHandler;
   private audioHandler: AudioHandler;
-  private allowedUserIds: Set<string>;
+  private userManager: UserManager;
 
   constructor() {
     this.bot = new Bot(config.telegram.botToken);
@@ -20,7 +21,13 @@ export class TelegramInputHandler {
     this.output = new TelegramOutputHandler();
     this.documentHandler = new DocumentHandler();
     this.audioHandler = new AudioHandler();
-    this.allowedUserIds = new Set(config.telegram.allowedUserIds);
+    this.userManager = new UserManager();
+
+    // Seed approved users from .env (migration from old TELEGRAM_ALLOWED_USER_IDS)
+    const envIds = config.telegram.allowedUserIds;
+    if (envIds && envIds.length > 0 && envIds[0] !== '') {
+      this.userManager.seedFromEnv(envIds);
+    }
   }
 
   async start(): Promise<void> {
@@ -45,20 +52,34 @@ export class TelegramInputHandler {
   }
 
   private registerHandlers(): void {
-    // Global whitelist middleware
+    // Global access control middleware
     this.bot.use(async (ctx, next) => {
       const userId = String(ctx.from?.id ?? '');
-      if (!this.isAllowed(userId)) {
-        logger.warn(`Blocked unauthorized user: ${userId}`);
-        return; // Silent ignore
+      if (!userId) return;
+
+      // Check if user is approved
+      if (this.userManager.isApproved(userId)) {
+        await next();
+        return;
       }
-      await next();
+
+      // /start is allowed for everyone (shows welcome + access request)
+      if (ctx.message && 'text' in ctx.message && ctx.message.text === '/start') {
+        await this.handleUnauthorizedStart(ctx, userId);
+        return;
+      }
+
+      // Unknown user — generate code and send instructions
+      await this.handleUnauthorizedUser(ctx, userId);
     });
 
     // /start command
     this.bot.command('start', async (ctx) => {
+      const userId = String(ctx.from?.id ?? '');
       await ctx.reply(
-        '👋 Olá! Sou o *BollaClaw*, seu assistente pessoal de IA.\n\nEnvie uma mensagem, arquivo PDF ou nota de voz para começar.',
+        `👋 Olá! Sou o *BollaClaw*, seu assistente pessoal de IA.\n\n` +
+        `Envie uma mensagem, arquivo PDF ou nota de voz para começar.\n\n` +
+        `_Seu ID: \`${userId}\`_`,
         { parse_mode: 'Markdown' }
       );
     });
@@ -66,8 +87,12 @@ export class TelegramInputHandler {
     // /status command
     this.bot.command('status', async (ctx) => {
       const status = this.controller.getStatus();
+      const userId = String(ctx.from?.id ?? '');
+      const isAdmin = this.userManager.isAdmin(userId);
+      const adminBadge = isAdmin ? ' 👑' : '';
+
       const msg = [
-        `🟢 *BollaClaw Status*`,
+        `🟢 *BollaClaw Status*${adminBadge}`,
         `Provider: \`${status.defaultProvider}\``,
         `Models: ${status.providers.map((p) => `${p.name}(${p.model})`).join(', ')}`,
         `Skills: ${status.skills.length} (${status.skills.map((s) => s.name).join(', ') || 'none'})`,
@@ -80,6 +105,35 @@ export class TelegramInputHandler {
     this.bot.command('reload', async (ctx) => {
       this.controller.reloadSkills();
       await ctx.reply('✅ Skills recarregadas!');
+    });
+
+    // /myid command — show user's Telegram ID
+    this.bot.command('myid', async (ctx) => {
+      const userId = String(ctx.from?.id ?? '');
+      await ctx.reply(`Seu Telegram ID: \`${userId}\``, { parse_mode: 'Markdown' });
+    });
+
+    // /invite command (admin only) — show pending codes
+    this.bot.command('invite', async (ctx) => {
+      const userId = String(ctx.from?.id ?? '');
+      if (!this.userManager.isAdmin(userId)) {
+        await ctx.reply('🔒 Apenas admins podem usar este comando.');
+        return;
+      }
+
+      const pending = this.userManager.listPending();
+      if (pending.length === 0) {
+        await ctx.reply('✅ Nenhuma solicitação pendente.');
+        return;
+      }
+
+      let msg = `📋 *Solicitações pendentes (${pending.length}):*\n\n`;
+      for (const p of pending) {
+        msg += `• *${p.telegramName}* (ID: \`${p.telegramId}\`)\n`;
+        msg += `  Código: \`${p.code}\`\n`;
+        msg += `  Comando: \`bollaclaw add ${p.code}\`\n\n`;
+      }
+      await ctx.reply(msg, { parse_mode: 'Markdown' });
     });
 
     // Text messages
@@ -161,7 +215,6 @@ export class TelegramInputHandler {
         logger.info(`Voice transcript from ${userId}: "${transcript.substring(0, 80)}"`);
 
         await this.output.sendTyping(ctx);
-        // Auto-reply with audio when input is voice
         const result = await this.controller.process(userId, transcript, config.audio.autoAudioReply);
         await this.output.send(ctx, result);
       } catch (err) {
@@ -177,9 +230,46 @@ export class TelegramInputHandler {
     });
   }
 
-  private isAllowed(userId: string): boolean {
-    if (this.allowedUserIds.size === 0) return false;
-    return this.allowedUserIds.has(userId);
+  // ── Unauthorized user handlers ───────────────────────────
+
+  private async handleUnauthorizedStart(ctx: Context, userId: string): Promise<void> {
+    const userName = this.getUserDisplayName(ctx);
+    const pending = this.userManager.requestAccess(userId, userName);
+
+    await ctx.reply(
+      `👋 Olá *${userName}*!\n\n` +
+      `Eu sou o *BollaClaw*, um assistente pessoal de IA.\n\n` +
+      `🔒 Seu acesso ainda não foi autorizado.\n\n` +
+      `Para ser adicionado, peça ao administrador para executar no servidor:\n\n` +
+      `\`bollaclaw add ${pending.code}\`\n\n` +
+      `_Seu código expira em 48 horas._\n` +
+      `_Seu ID: \`${userId}\`_`,
+      { parse_mode: 'Markdown' }
+    );
+
+    logger.info(`Access requested by ${userName} (${userId}), code: ${pending.code}`);
+  }
+
+  private async handleUnauthorizedUser(ctx: Context, userId: string): Promise<void> {
+    const userName = this.getUserDisplayName(ctx);
+    const pending = this.userManager.requestAccess(userId, userName);
+
+    await ctx.reply(
+      `🔒 *Acesso não autorizado*\n\n` +
+      `Para usar o BollaClaw, peça ao administrador:\n\n` +
+      `\`bollaclaw add ${pending.code}\`\n\n` +
+      `_Código: \`${pending.code}\` • Expira em 48h_`,
+      { parse_mode: 'Markdown' }
+    );
+  }
+
+  private getUserDisplayName(ctx: Context): string {
+    const from = ctx.from;
+    if (!from) return 'Usuário';
+    if (from.first_name && from.last_name) return `${from.first_name} ${from.last_name}`;
+    if (from.first_name) return from.first_name;
+    if (from.username) return from.username;
+    return 'Usuário';
   }
 
   private detectAudioRequest(text: string): boolean {

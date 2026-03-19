@@ -3,6 +3,9 @@
   "version": "0.1.0",
   "description": "BollaClaw - Personal AI Agent via Telegram, running on Ubuntu server",
   "main": "dist/main.js",
+  "bin": {
+    "bollaclaw": "dist/bin/bollaclaw.js"
+  },
   "scripts": {
     "dev": "nodemon --exec ts-node src/main.ts",
     "build": "tsc",
@@ -12,7 +15,8 @@
     "pm2:restart": "pm2 restart bollaclaw",
     "pm2:logs": "pm2 logs bollaclaw",
     "onboard": "node dist/onboard/cli.js",
-    "onboard:dev": "ts-node src/onboard/cli.ts"
+    "onboard:dev": "ts-node src/onboard/cli.ts",
+    "cli": "node dist/bin/bollaclaw.js"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.30.0",

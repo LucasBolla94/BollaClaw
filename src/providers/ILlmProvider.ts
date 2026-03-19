@@ -3,6 +3,8 @@ export interface Message {
   content: string;
   tool_call_id?: string;
   name?: string;
+  /** Carries tool call info on assistant messages so providers can reconstruct native format */
+  _toolUseCalls?: ToolCall[];
 }
 
 export interface ToolDefinition {

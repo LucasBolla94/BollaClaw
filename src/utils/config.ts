@@ -27,7 +27,7 @@ function buildConfig() {
   return {
     telegram: {
       botToken: requireEnv('TELEGRAM_BOT_TOKEN'),
-      allowedUserIds: requireEnv('TELEGRAM_ALLOWED_USER_IDS')
+      allowedUserIds: optionalEnv('TELEGRAM_ALLOWED_USER_IDS', '')
         .split(',')
         .map((id) => id.trim())
         .filter(Boolean),

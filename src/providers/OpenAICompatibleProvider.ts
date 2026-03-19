@@ -7,8 +7,6 @@ import { logger } from '../utils/logger';
  * Universal provider for ALL OpenAI-compatible APIs:
  * OpenAI, DeepSeek, Groq, OpenRouter, Together, Fireworks, xAI/Grok,
  * Mistral, Cerebras, Ollama, LM Studio, and any other OpenAI-compatible endpoint.
- *
- * This single class replaces the old DeepSeekProvider and GroqProvider.
  */
 export class OpenAICompatibleProvider implements ILlmProvider {
   public readonly name: string;
@@ -32,7 +30,6 @@ export class OpenAICompatibleProvider implements ILlmProvider {
       baseURL: entry.baseUrl,
     };
 
-    // Inject custom headers if configured (e.g., OpenRouter needs HTTP-Referer)
     if (entry.headers) {
       clientOptions.defaultHeaders = entry.headers;
     }
@@ -41,22 +38,37 @@ export class OpenAICompatibleProvider implements ILlmProvider {
   }
 
   async complete(messages: Message[], tools?: ToolDefinition[]): Promise<LlmResponse> {
-    // Map messages to OpenAI format
-    const openaiMessages: OpenAI.Chat.ChatCompletionMessageParam[] = messages.map((m) => {
+    const openaiMessages: OpenAI.Chat.ChatCompletionMessageParam[] = [];
+
+    for (const m of messages) {
       if (m.role === 'tool') {
-        return {
+        openaiMessages.push({
           role: 'tool' as const,
           content: m.content,
           tool_call_id: m.tool_call_id ?? '',
-        };
+        });
+      } else if (m.role === 'assistant' && m._toolUseCalls && m._toolUseCalls.length > 0) {
+        // Assistant message with tool calls — reconstruct OpenAI tool_calls format
+        openaiMessages.push({
+          role: 'assistant' as const,
+          content: m.content || null,
+          tool_calls: m._toolUseCalls.map((tc) => ({
+            id: tc.id,
+            type: 'function' as const,
+            function: {
+              name: tc.name,
+              arguments: JSON.stringify(tc.arguments),
+            },
+          })),
+        });
+      } else {
+        openaiMessages.push({
+          role: m.role as 'system' | 'user' | 'assistant',
+          content: m.content,
+        });
       }
-      return {
-        role: m.role as 'system' | 'user' | 'assistant',
-        content: m.content,
-      };
-    });
+    }
 
-    // Map tools
     const openaiTools: OpenAI.Chat.ChatCompletionTool[] | undefined = tools?.length
       ? tools.map((t) => ({
           type: 'function' as const,
