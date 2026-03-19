@@ -157,19 +157,30 @@ echo ""
 echo -e "${BOLD}[7/7]${NC} Configuração interativa..."
 echo ""
 
-if [ ! -f ".env" ] || [ ! -f ".agents/identity.json" ]; then
-  echo -e "  ${CYAN}Agora vamos configurar o BollaClaw.${NC}"
+if [ ! -f ".env" ]; then
   echo -e "  ${CYAN}Responda as perguntas abaixo para completar o setup.${NC}"
   echo ""
   # CRITICAL: use </dev/tty to read from terminal even when piped via curl | bash
   node dist/onboard/cli.js </dev/tty
 else
-  echo -e "  Configuração já existe (.env + identity.json)  ${GREEN}✓${NC}"
+  echo -e "  Configuração já existe (.env)  ${GREEN}✓${NC}"
   echo -n "  Deseja reconfigurar? (s/N): "
   read -r RECONFIG </dev/tty
   if [ "$RECONFIG" = "s" ] || [ "$RECONFIG" = "S" ]; then
     node dist/onboard/cli.js </dev/tty
   fi
+fi
+
+# ============================================================
+# Install Whisper local if user chose it
+# ============================================================
+if grep -q "STT_PROVIDER=local_whisper" .env 2>/dev/null; then
+  echo ""
+  echo -e "  ${BOLD}Instalando Whisper local (CPU)...${NC}"
+  run_silent "Instalando openai-whisper + torch CPU" bash -c 'pip3 install openai-whisper --break-system-packages 2>/dev/null || pip3 install openai-whisper'
+  # Pre-download the base model
+  run_silent "Baixando modelo whisper-base (~150MB)" bash -c 'python3 -c "import whisper; whisper.load_model(\"base\")" 2>/dev/null || true'
+  echo -e "  ${GREEN}✓${NC} Whisper local instalado (pt-BR + en)"
 fi
 
 # ============================================================

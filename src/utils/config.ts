@@ -55,7 +55,7 @@ function buildConfig() {
     },
     admin: {
       enabled: optionalEnv('ADMIN_ENABLED', 'true') === 'true',
-      port: parseInt(optionalEnv('ADMIN_PORT', '3000'), 10),
+      port: parseInt(optionalEnv('ADMIN_PORT', '21086'), 10),
       password: optionalEnv('ADMIN_PASSWORD', 'bollaclaw'),
       host: optionalEnv('ADMIN_HOST', '0.0.0.0'),
     },
