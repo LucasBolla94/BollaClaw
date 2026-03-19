@@ -2,6 +2,17 @@
 name: general-assistant
 description: Assistente geral para conversas, perguntas, resumos e tarefas cotidianas
 version: "1.0"
+triggers:
+  - resumo
+  - email
+  - ajuda
+  - explique
+  - escreva
+  - crie um texto
+  - traduza
+tags:
+  - general
+  - assistant
 ---
 
 # Skill: Assistente Geral

@@ -1,0 +1,16 @@
+{
+  "name": "weather_current",
+  "description": "Busca o clima atual de uma cidade. Retorna temperatura, umidade, vento, condição climática.",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "city": {
+        "type": "string",
+        "description": "Nome da cidade (ex: 'São Paulo', 'New York', 'Tokyo')"
+      }
+    },
+    "required": ["city"]
+  },
+  "script": "scripts/main.py",
+  "runtime": "python"
+}

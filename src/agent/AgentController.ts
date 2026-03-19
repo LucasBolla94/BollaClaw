@@ -1,8 +1,10 @@
 import { ProviderFactory } from '../providers/ProviderFactory';
 import { ToolRegistry } from '../tools/ToolRegistry';
+import { ScriptTool } from '../tools/ScriptTool';
 import { MemoryManager } from '../memory/MemoryManager';
 import { SkillLoader, Skill } from '../skills/SkillLoader';
 import { SkillRouter } from '../skills/SkillRouter';
+import { SkillExecutor } from '../skills/SkillExecutor';
 import { AgentLoop, AgentResult } from './AgentLoop';
 import { OnboardManager, IdentityConfig } from '../onboard/OnboardManager';
 import { config } from '../utils/config';
@@ -12,6 +14,7 @@ export class AgentController {
   private toolRegistry: ToolRegistry;
   private memoryManager: MemoryManager;
   private skillLoader: SkillLoader;
+  private skillExecutor: SkillExecutor;
   private onboardManager: OnboardManager;
   private skills: Skill[] = [];
   private identity: IdentityConfig | null = null;
@@ -21,6 +24,7 @@ export class AgentController {
     this.toolRegistry = new ToolRegistry();
     this.memoryManager = new MemoryManager();
     this.skillLoader = new SkillLoader();
+    this.skillExecutor = new SkillExecutor();
     this.onboardManager = new OnboardManager();
   }
 
@@ -33,10 +37,39 @@ export class AgentController {
       logger.warn('No owner configured. Run onboard: npm run onboard');
     }
 
-    // Load skills
-    this.skills = this.skillLoader.loadAll();
+    // Load skills + register their tools
+    await this.loadAndRegisterSkills();
+
     this.isReady = true;
     logger.info(`AgentController ready. Skills: ${this.skills.length}, Tools: ${this.toolRegistry.listNames().join(', ')}`);
+  }
+
+  /**
+   * Load all skills and register their custom tools in the ToolRegistry
+   */
+  private async loadAndRegisterSkills(): Promise<void> {
+    this.skills = this.skillLoader.loadAll();
+
+    for (const skill of this.skills) {
+      // Register custom tools defined by the skill
+      if (skill.tools.length > 0) {
+        for (const toolDef of skill.tools) {
+          const scriptTool = new ScriptTool(toolDef, skill.dirPath);
+          this.toolRegistry.register(scriptTool);
+          logger.info(`Registered skill tool: ${toolDef.name} (from ${skill.name})`);
+        }
+      }
+
+      // Install dependencies if needed (runs once)
+      if (skill.dependencies) {
+        const depsCheck = await this.skillExecutor.checkDependencies(skill);
+        if (!depsCheck.ok) {
+          logger.warn(`Skill ${skill.name} has missing dependencies: ${depsCheck.missing.join(', ')}`);
+          // Auto-install on first load
+          await this.skillLoader.installDependencies(skill);
+        }
+      }
+    }
   }
 
   private getSystemPrompt(): string {
@@ -44,7 +77,6 @@ export class AgentController {
       return this.onboardManager.buildSystemPrompt(this.identity);
     }
 
-    // Fallback: default prompt if no onboard was done
     const now = new Date().toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo' });
     return `Você é o BollaClaw, um assistente pessoal de IA inteligente e prestativo.
 Você está rodando em um servidor Ubuntu dedicado e se comunica exclusivamente via Telegram.
@@ -79,16 +111,17 @@ Data/hora atual: ${now}`;
     if (this.skills.length > 0) {
       const router = new SkillRouter(ProviderFactory.create('groq') ?? provider);
       const skill = await router.route(userMessage, this.skills);
+
       if (skill) {
-        systemPrompt = `${systemPrompt}\n\n## Active Skill: ${skill.name}\n${skill.content}`;
-        logger.info(`Using skill: ${skill.name}`);
+        systemPrompt = this.buildSkillPrompt(systemPrompt, skill);
+        logger.info(`Using skill: ${skill.name} (executable: ${skill.isExecutable})`);
       }
     }
 
     // Add tool names to system prompt
     const toolNames = this.toolRegistry.listNames();
     if (toolNames.length > 0) {
-      systemPrompt += `\n\nAvailable tools: ${toolNames.join(', ')}`;
+      systemPrompt += `\n\nFerramentas disponíveis: ${toolNames.join(', ')}`;
     }
 
     // Run agent loop
@@ -101,9 +134,50 @@ Data/hora atual: ${now}`;
     return result;
   }
 
+  /**
+   * Build the enhanced system prompt when a skill is active
+   */
+  private buildSkillPrompt(basePrompt: string, skill: Skill): string {
+    let prompt = `${basePrompt}\n\n## Skill Ativa: ${skill.name}\n`;
+
+    // Inject skill instructions
+    prompt += skill.content;
+
+    // If skill is executable, tell the agent about its capabilities
+    if (skill.isExecutable) {
+      prompt += `\n\n### Execução\n`;
+      prompt += `Esta skill tem scripts executáveis (runtime: ${skill.runtime ?? 'auto'}).\n`;
+
+      if (skill.tools.length > 0) {
+        prompt += `\nFerramentas desta skill:\n`;
+        for (const tool of skill.tools) {
+          prompt += `- **${tool.name}**: ${tool.description}\n`;
+        }
+        prompt += `\nUse estas ferramentas quando a tarefa exigir. Elas executam scripts reais no servidor.\n`;
+      }
+
+      if (skill.api?.baseUrl) {
+        prompt += `\nAPI base: ${skill.api.baseUrl}\n`;
+      }
+    }
+
+    return prompt;
+  }
+
   reloadSkills(): void {
-    this.skills = this.skillLoader.loadAll();
-    logger.info(`Skills reloaded: ${this.skills.length}`);
+    // Unregister old skill tools (keep only built-in)
+    const builtinTools = ['create_file', 'read_file', 'get_datetime'];
+    const currentTools = this.toolRegistry.listNames();
+    for (const toolName of currentTools) {
+      if (!builtinTools.includes(toolName)) {
+        this.toolRegistry.unregister(toolName);
+      }
+    }
+
+    // Reload and re-register
+    this.loadAndRegisterSkills().then(() => {
+      logger.info(`Skills reloaded: ${this.skills.length}`);
+    });
   }
 
   reloadIdentity(): void {
@@ -117,7 +191,13 @@ Data/hora atual: ${now}`;
       provider: config.llm.provider,
       agentName: this.identity?.agentName ?? 'BollaClaw',
       owner: this.identity?.ownerName ?? '(not configured)',
-      skills: this.skills.map((s) => ({ name: s.name, description: s.description })),
+      skills: this.skills.map((s) => ({
+        name: s.name,
+        description: s.description,
+        executable: s.isExecutable,
+        tools: s.tools.map((t) => t.name),
+        runtime: s.runtime,
+      })),
       tools: this.toolRegistry.listNames(),
     };
   }

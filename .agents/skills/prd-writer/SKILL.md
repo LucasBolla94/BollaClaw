@@ -2,6 +2,17 @@
 name: prd-writer
 description: Cria PRDs (Product Requirements Documents) e especificações técnicas de software
 version: "1.0"
+triggers:
+  - prd
+  - requisitos
+  - especificação
+  - spec
+  - product requirements
+  - documento de requisitos
+  - feature spec
+tags:
+  - documentation
+  - product
 ---
 
 # Skill: PRD Writer

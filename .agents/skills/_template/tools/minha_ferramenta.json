@@ -1,0 +1,16 @@
+{
+  "name": "minha_ferramenta",
+  "description": "Descreva o que esta ferramenta faz — o LLM usa isso para decidir quando usá-la",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "param1": {
+        "type": "string",
+        "description": "Descreva o parâmetro"
+      }
+    },
+    "required": ["param1"]
+  },
+  "script": "scripts/main.py",
+  "runtime": "python"
+}

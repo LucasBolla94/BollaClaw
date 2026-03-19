@@ -1,0 +1,20 @@
+{
+  "name": "weather_forecast",
+  "description": "Busca a previsão do tempo para os próximos dias de uma cidade. Retorna temperaturas min/max, probabilidade de chuva, condições.",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "city": {
+        "type": "string",
+        "description": "Nome da cidade (ex: 'São Paulo', 'Curitiba')"
+      },
+      "days": {
+        "type": "number",
+        "description": "Número de dias de previsão (1-16, padrão: 3)"
+      }
+    },
+    "required": ["city"]
+  },
+  "script": "scripts/main.py",
+  "runtime": "python"
+}
