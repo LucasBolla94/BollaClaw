@@ -2,11 +2,12 @@ import 'dotenv/config';
 import * as fs from 'fs';
 import { TelegramInputHandler } from './bot/TelegramInputHandler';
 import { startAdminServer } from './admin/AdminServer';
+import { OnboardManager } from './onboard/OnboardManager';
 import { config } from './utils/config';
 import { logger, captureLog } from './utils/logger';
 
 // Ensure required directories exist
-[config.paths.data, config.paths.tmp, config.paths.logs].forEach((dir) => {
+[config.paths.data, config.paths.tmp, config.paths.logs, './output'].forEach((dir) => {
   if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
 });
 
@@ -14,6 +15,17 @@ async function main() {
   logger.info('============================================');
   logger.info(' BollaClaw v0.1 - Starting up...');
   logger.info('============================================');
+
+  // Check onboard status
+  const onboard = new OnboardManager();
+  if (!onboard.isOnboarded()) {
+    logger.warn('⚠️  Identidade não configurada! Execute: npm run onboard');
+    logger.warn('   Usando configuração padrão...');
+  } else {
+    const identity = onboard.loadIdentity();
+    logger.info(`Agent: ${identity.agentName} | Owner: ${identity.ownerName || '(not set)'}`);
+  }
+
   logger.info(`Provider: ${config.llm.provider}`);
   logger.info(`STT: ${config.audio.sttProvider}`);
   logger.info(`Admin: ${config.admin.enabled ? `http://0.0.0.0:${config.admin.port}` : 'disabled'}`);
