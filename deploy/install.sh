@@ -24,7 +24,7 @@ LOG_FILE="/tmp/bollaclaw-install.log"
 # Clean log file
 > "$LOG_FILE"
 
-# Helper: run command silently, show spinner, log output
+# Helper: run command silently, log output, show ✓ or ✗
 run_silent() {
   local desc="$1"
   shift
@@ -33,7 +33,7 @@ run_silent() {
     echo -e " ${GREEN}✓${NC}"
   else
     echo -e " ${RED}✗${NC}"
-    echo -e "  ${RED}Erro! Veja detalhes: cat $LOG_FILE${NC}"
+    echo -e "  ${RED}Erro! Veja: cat $LOG_FILE${NC}"
     tail -5 "$LOG_FILE"
     exit 1
   fi
@@ -50,7 +50,7 @@ echo -e "${CYAN}╚════════════════════�
 echo ""
 
 # ============================================================
-# Check if running on Ubuntu/Debian
+# Check Ubuntu/Debian
 # ============================================================
 if ! command -v apt &> /dev/null; then
   echo -e "${RED}❌ Este script é apenas para Ubuntu/Debian.${NC}"
@@ -58,17 +58,17 @@ if ! command -v apt &> /dev/null; then
 fi
 
 # ============================================================
-# [1/8] System Update
+# [1/7] System Update
 # ============================================================
-echo -e "${BOLD}[1/8]${NC} Atualizando sistema..."
+echo -e "${BOLD}[1/7]${NC} Atualizando sistema..."
 run_silent "Atualizando lista de pacotes" sudo apt update -qq
 run_silent "Aplicando atualizações" sudo apt upgrade -y -qq
 
 # ============================================================
-# [2/8] Install Node.js 20 LTS
+# [2/7] Install Node.js 20 LTS
 # ============================================================
 echo ""
-echo -e "${BOLD}[2/8]${NC} Node.js 20 LTS..."
+echo -e "${BOLD}[2/7]${NC} Node.js 20 LTS..."
 if command -v node &> /dev/null; then
   NODE_VER=$(node --version | cut -d'v' -f2 | cut -d'.' -f1)
   if [ "$NODE_VER" -ge 20 ]; then
@@ -84,10 +84,10 @@ fi
 echo -e "  Node: ${GREEN}$(node --version)${NC} | npm: ${GREEN}$(npm --version)${NC}"
 
 # ============================================================
-# [3/8] Install PM2
+# [3/7] Install PM2
 # ============================================================
 echo ""
-echo -e "${BOLD}[3/8]${NC} PM2 (Process Manager)..."
+echo -e "${BOLD}[3/7]${NC} PM2 (Process Manager)..."
 if command -v pm2 &> /dev/null; then
   echo -e "  PM2 $(pm2 --version) já instalado                  ${GREEN}✓${NC}"
 else
@@ -95,10 +95,10 @@ else
 fi
 
 # ============================================================
-# [4/8] Install system dependencies
+# [4/7] Install system dependencies
 # ============================================================
 echo ""
-echo -e "${BOLD}[4/8]${NC} Dependências de sistema..."
+echo -e "${BOLD}[4/7]${NC} Dependências de sistema..."
 run_silent "build-essential + python3 + ffmpeg" sudo apt install -y -qq build-essential python3 python3-pip ffmpeg
 
 if command -v python3 &> /dev/null; then
@@ -108,10 +108,10 @@ else
 fi
 
 # ============================================================
-# [5/8] Clone or Update Repository
+# [5/7] Clone or Update Repository
 # ============================================================
 echo ""
-echo -e "${BOLD}[5/8]${NC} Repositório BollaClaw..."
+echo -e "${BOLD}[5/7]${NC} Repositório BollaClaw..."
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd || echo "")"
 if [ -n "$SCRIPT_DIR" ] && [ -f "$SCRIPT_DIR/../package.json" ]; then
@@ -137,46 +137,51 @@ else
 fi
 
 # ============================================================
-# [6/8] Install Dependencies + Build
+# [6/7] Install Dependencies + Build
 # ============================================================
 echo ""
-echo -e "${BOLD}[6/8]${NC} Compilando BollaClaw..."
+echo -e "${BOLD}[6/7]${NC} Compilando BollaClaw..."
 run_silent "npm install" npm install --production=false --silent
 run_silent "TypeScript build" npm run build
 
 # Create required directories
 mkdir -p data tmp logs output .agents/skills
 
-# ============================================================
-# [7/8] Onboard Wizard
-# ============================================================
 echo ""
-echo -e "${BOLD}[7/8]${NC} Configuração do agente..."
+echo -e "  ${GREEN}✓ Instalação de dependências completa!${NC}"
+echo ""
+
+# ============================================================
+# [7/7] Interactive Setup Wizard
+# ============================================================
+echo -e "${BOLD}[7/7]${NC} Configuração interativa..."
+echo ""
 
 if [ ! -f ".env" ] || [ ! -f ".agents/identity.json" ]; then
+  echo -e "  ${CYAN}Agora vamos configurar o BollaClaw.${NC}"
+  echo -e "  ${CYAN}Responda as perguntas abaixo para completar o setup.${NC}"
   echo ""
-  echo -e "  ${CYAN}O wizard vai configurar seu .env e a identidade do agente.${NC}"
-  echo ""
-  node dist/onboard/cli.js
+  # CRITICAL: use </dev/tty to read from terminal even when piped via curl | bash
+  node dist/onboard/cli.js </dev/tty
 else
   echo -e "  Configuração já existe (.env + identity.json)  ${GREEN}✓${NC}"
   echo -n "  Deseja reconfigurar? (s/N): "
-  read -r RECONFIG
+  read -r RECONFIG </dev/tty
   if [ "$RECONFIG" = "s" ] || [ "$RECONFIG" = "S" ]; then
-    node dist/onboard/cli.js
+    node dist/onboard/cli.js </dev/tty
   fi
 fi
 
 # ============================================================
-# [8/8] Setup PM2 + Auto-Start
+# Start PM2 + Auto-Start (AFTER wizard completes)
 # ============================================================
 echo ""
-echo -e "${BOLD}[8/8]${NC} Iniciando com PM2..."
+echo -e "  ${BOLD}Iniciando serviço...${NC}"
 
 # Stop existing instance
 pm2 delete bollaclaw >> "$LOG_FILE" 2>&1 || true
 
-run_silent "Iniciando BollaClaw" pm2 start ecosystem.config.js
+run_silent "Iniciando BollaClaw via PM2" pm2 start ecosystem.config.js
 run_silent "Salvando processo PM2" pm2 save
 
 # Auto-start on boot

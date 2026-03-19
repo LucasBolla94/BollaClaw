@@ -341,8 +341,13 @@ async function stepExtras(rl: readline.Interface, mainProviderId: string): Promi
 // ═══════════════════════════════════════════════════════════
 
 async function main(): Promise<void> {
+  // Use /dev/tty when stdin is piped (e.g. curl | bash), otherwise use stdin
+  const ttyInput = process.stdin.isTTY
+    ? process.stdin
+    : fs.createReadStream('/dev/tty');
+
   const rl = readline.createInterface({
-    input: process.stdin,
+    input: ttyInput,
     output: process.stdout,
   });
 

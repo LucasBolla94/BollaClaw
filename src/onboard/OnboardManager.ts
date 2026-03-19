@@ -112,8 +112,14 @@ export class OnboardManager {
    * Interactive CLI onboarding — runs in terminal
    */
   async runInteractiveOnboard(): Promise<IdentityConfig> {
+    // Use /dev/tty when stdin is piped (e.g. curl | bash)
+    const fs = require('fs');
+    const ttyInput = process.stdin.isTTY
+      ? process.stdin
+      : fs.createReadStream('/dev/tty');
+
     const rl = readline.createInterface({
-      input: process.stdin,
+      input: ttyInput,
       output: process.stdout,
     });
 
