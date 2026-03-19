@@ -13,10 +13,10 @@ export class GroqProvider implements ILlmProvider {
   }
 
   async complete(messages: Message[], tools?: ToolDefinition[]): Promise<LlmResponse> {
-    const groqMessages: Groq.Chat.ChatCompletionMessageParam[] = messages.map((m) => ({
-      role: m.role as Groq.Chat.ChatCompletionMessageParam['role'],
+    const groqMessages = messages.map((m) => ({
+      role: m.role as any,
       content: m.content,
-    }));
+    })) as Groq.Chat.ChatCompletionMessageParam[];
 
     const groqTools: Groq.Chat.ChatCompletionTool[] | undefined = tools?.map((t) => ({
       type: 'function' as const,

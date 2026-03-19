@@ -27,7 +27,7 @@ export class OpenAICompatibleProvider implements ILlmProvider {
       throw new Error(`OpenAI-compatible provider "${providerName}" requires a baseUrl`);
     }
 
-    const clientOptions: OpenAI.ClientOptions = {
+    const clientOptions: Record<string, unknown> = {
       apiKey: entry.apiKey,
       baseURL: entry.baseUrl,
     };
@@ -37,7 +37,7 @@ export class OpenAICompatibleProvider implements ILlmProvider {
       clientOptions.defaultHeaders = entry.headers;
     }
 
-    this.client = new OpenAI(clientOptions);
+    this.client = new OpenAI(clientOptions as any);
   }
 
   async complete(messages: Message[], tools?: ToolDefinition[]): Promise<LlmResponse> {

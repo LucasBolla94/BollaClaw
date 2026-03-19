@@ -142,13 +142,14 @@ export class TelegramInputHandler {
     this.bot.on(['message:voice', 'message:audio'], async (ctx) => {
       const userId = String(ctx.from.id);
       const media = 'voice' in ctx.message ? ctx.message.voice : ctx.message.audio;
+      if (!media) return;
 
       await ctx.replyWithChatAction('record_voice');
 
       try {
         const fileInfo = await ctx.api.getFile(media.file_id);
         const fileUrl = `https://api.telegram.org/file/bot${config.telegram.botToken}/${fileInfo.file_path}`;
-        const mimeType = ('mime_type' in media ? media.mime_type : undefined) ?? 'audio/ogg';
+        const mimeType = ('mime_type' in media ? (media as any).mime_type : undefined) ?? 'audio/ogg';
 
         const transcript = await this.audioHandler.transcribeFromUrl(fileUrl, mimeType);
 

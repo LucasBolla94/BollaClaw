@@ -16,10 +16,10 @@ export class DeepSeekProvider implements ILlmProvider {
   }
 
   async complete(messages: Message[], tools?: ToolDefinition[]): Promise<LlmResponse> {
-    const openaiMessages: OpenAI.Chat.ChatCompletionMessageParam[] = messages.map((m) => ({
-      role: m.role as OpenAI.Chat.ChatCompletionMessageParam['role'],
+    const openaiMessages = messages.map((m) => ({
+      role: m.role as any,
       content: m.content,
-    }));
+    })) as OpenAI.Chat.ChatCompletionMessageParam[];
 
     const openaiTools: OpenAI.Chat.ChatCompletionTool[] | undefined = tools?.map((t) => ({
       type: 'function' as const,

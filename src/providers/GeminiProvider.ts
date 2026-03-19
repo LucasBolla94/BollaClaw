@@ -25,7 +25,7 @@ export class GeminiProvider implements ILlmProvider {
             functionDeclarations: tools.map((t) => ({
               name: t.name,
               description: t.description,
-              parameters: t.parameters as FunctionDeclaration['parameters'],
+              parameters: t.parameters as unknown as FunctionDeclaration['parameters'],
             })),
           },
         ]
