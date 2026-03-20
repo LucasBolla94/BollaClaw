@@ -4,11 +4,14 @@ dotenv.config();
 import express from 'express';
 import cors from 'cors';
 import apiRoutes from './api/routes';
+import logRoutes from './api/logRoutes';
 import { getDatabase, cleanupOldEvents, closeDatabase } from './db/Database';
 import { getDashboardHtml } from './dashboard/dashboard';
+import { authMiddleware, handleLoginPage, handleLoginSubmit, handleLogout } from './auth/AuthMiddleware';
 
 // ============================================================
 // BollaWatch v2 — Central Telemetry Hub
+// URL: http://watch.bolla.network
 // ============================================================
 
 const PORT = parseInt(process.env.PORT || '21087', 10);
@@ -34,25 +37,36 @@ app.use(express.json({ limit: '10mb' }));
 
 // Request logging (only non-heartbeat routes to avoid spam)
 app.use((req, _res, next) => {
-  if (req.method !== 'POST' || (!req.path.includes('/events') && !req.path.includes('/metrics'))) {
-    if (req.path !== '/health' && req.path !== '/') {
+  if (req.method !== 'POST' || (!req.path.includes('/events') && !req.path.includes('/metrics') && !req.path.includes('/logs'))) {
+    if (req.path !== '/health' && req.path !== '/' && req.path !== '/login') {
       console.log(`[BollaWatch] ${req.method} ${req.path}`);
     }
   }
   next();
 });
 
+// ── Authentication ────────────────────────────────────────
+app.use(authMiddleware);
+
+// ── Login routes (before API routes) ─────────────────────
+app.get('/login', handleLoginPage);
+app.post('/api/v1/auth/login', handleLoginSubmit);
+app.get('/logout', handleLogout);
+
 // ── Routes ────────────────────────────────────────────────
 
 // API routes
 app.use(apiRoutes);
+
+// Log ingestion routes
+app.use(logRoutes);
 
 // Dashboard (single HTML page)
 app.get('/', (_req, res) => {
   res.type('html').send(getDashboardHtml());
 });
 
-// Health check
+// Health check (public — no auth)
 app.get('/health', (_req, res) => {
   res.json({ status: 'ok', uptime: Math.round(process.uptime()), timestamp: new Date().toISOString() });
 });
@@ -93,19 +107,23 @@ const cleanupTimer = setInterval(() => {
 // ── Start Server ──────────────────────────────────────────
 
 const server = app.listen(PORT, HOST, () => {
+  const secret = process.env.BOLLAWATCH_SECRET || '35868115';
   console.log(`
 ╔═══════════════════════════════════════════════════╗
 ║   👁️  BollaWatch v2 — Telemetry Hub              ║
 ╠═══════════════════════════════════════════════════╣
 ║                                                   ║
-║   Dashboard: http://${HOST}:${PORT}                  ║
-║   API Base:  http://${HOST}:${PORT}/api/v1           ║
-║   Health:    http://${HOST}:${PORT}/health            ║
+║   URL:     http://watch.bolla.network             ║
+║   Local:   http://${HOST}:${PORT}                    ║
+║   Health:  http://${HOST}:${PORT}/health            ║
+║                                                   ║
+║   Auth:    ENABLED (senha: ${secret.substring(0,3)}...)               ║
 ║                                                   ║
 ║   Features:                                       ║
-║     • Event ingestion & querying                  ║
+║     • Event + Log ingestion & querying            ║
 ║     • Instance management & cleanup               ║
 ║     • Resolve/unresolve events                    ║
+║     • Raw PM2 log capture                         ║
 ║     • DB archiving & log rotation                 ║
 ║     • Full health API for automation              ║
 ║                                                   ║
