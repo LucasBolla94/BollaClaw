@@ -3,19 +3,46 @@ dotenv.config();
 
 import express from 'express';
 import cors from 'cors';
-import * as path from 'path';
 import apiRoutes from './api/routes';
-import { getDatabase, cleanupOldEvents } from './db/Database';
+import { getDatabase, cleanupOldEvents, closeDatabase } from './db/Database';
 import { getDashboardHtml } from './dashboard/dashboard';
+
+// ============================================================
+// BollaWatch v2 — Central Telemetry Hub
+// ============================================================
 
 const PORT = parseInt(process.env.PORT || '21087', 10);
 const HOST = process.env.HOST || '0.0.0.0';
+const CLEANUP_INTERVAL_MS = 6 * 60 * 60 * 1000; // 6 hours
 
 const app = express();
 
-// Middleware
+// ── Middleware ─────────────────────────────────────────────
+
+// Security headers
+app.disable('x-powered-by');
+app.use((_req, res, next) => {
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  res.setHeader('X-Frame-Options', 'SAMEORIGIN');
+  res.setHeader('X-XSS-Protection', '1; mode=block');
+  res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
+  next();
+});
+
 app.use(cors());
 app.use(express.json({ limit: '10mb' }));
+
+// Request logging (only non-heartbeat routes to avoid spam)
+app.use((req, _res, next) => {
+  if (req.method !== 'POST' || (!req.path.includes('/events') && !req.path.includes('/metrics'))) {
+    if (req.path !== '/health' && req.path !== '/') {
+      console.log(`[BollaWatch] ${req.method} ${req.path}`);
+    }
+  }
+  next();
+});
+
+// ── Routes ────────────────────────────────────────────────
 
 // API routes
 app.use(apiRoutes);
@@ -27,42 +54,95 @@ app.get('/', (_req, res) => {
 
 // Health check
 app.get('/health', (_req, res) => {
-  res.json({ status: 'ok', uptime: process.uptime() });
+  res.json({ status: 'ok', uptime: Math.round(process.uptime()), timestamp: new Date().toISOString() });
 });
 
-// Initialize database
-getDatabase();
+// ── Initialize ────────────────────────────────────────────
 
-// Schedule cleanup every 6 hours
-setInterval(() => {
+// Test database connection on startup
+try {
+  getDatabase();
+  console.log('[BollaWatch] Database initialized successfully');
+} catch (err) {
+  console.error('[BollaWatch] FATAL: Database initialization failed:', err);
+  process.exit(1);
+}
+
+// Run initial cleanup
+try {
+  const result = cleanupOldEvents();
+  if (result.eventsDeleted > 0 || result.metricsDeleted > 0) {
+    console.log(`[BollaWatch] Startup cleanup: ${result.eventsDeleted} events, ${result.metricsDeleted} metrics removed`);
+  }
+} catch (err) {
+  console.error('[BollaWatch] Warning: Startup cleanup failed:', err);
+}
+
+// Schedule periodic cleanup
+const cleanupTimer = setInterval(() => {
   try {
-    cleanupOldEvents();
-    console.log('[BollaWatch] Cleanup completed');
+    const result = cleanupOldEvents();
+    if (result.eventsDeleted > 0 || result.metricsDeleted > 0) {
+      console.log(`[BollaWatch] Cleanup: ${result.eventsDeleted} events, ${result.metricsDeleted} metrics removed`);
+    }
   } catch (err) {
     console.error('[BollaWatch] Cleanup error:', err);
   }
-}, 6 * 60 * 60 * 1000);
+}, CLEANUP_INTERVAL_MS);
 
-// Start server
-app.listen(PORT, HOST, () => {
+// ── Start Server ──────────────────────────────────────────
+
+const server = app.listen(PORT, HOST, () => {
   console.log(`
-╔══════════════════════════════════════════════╗
-║   👁️  BollaWatch v0.1 - Telemetry Hub       ║
-╠══════════════════════════════════════════════╣
-║                                              ║
-║   Dashboard: http://${HOST}:${PORT}             ║
-║   API Base:  http://${HOST}:${PORT}/api/v1      ║
-║                                              ║
-║   Endpoints:                                 ║
-║     POST /api/v1/register  — Register bot    ║
-║     POST /api/v1/events    — Send events     ║
-║     POST /api/v1/metrics   — Send metrics    ║
-║     GET  /api/v1/events    — Query events    ║
-║     GET  /api/v1/errors    — View errors     ║
-║     GET  /api/v1/instances — List instances   ║
-║     GET  /api/v1/metrics   — Query metrics   ║
-║     GET  /api/v1/stats     — Quick stats     ║
-║                                              ║
-╚══════════════════════════════════════════════╝
+╔═══════════════════════════════════════════════════╗
+║   👁️  BollaWatch v2 — Telemetry Hub              ║
+╠═══════════════════════════════════════════════════╣
+║                                                   ║
+║   Dashboard: http://${HOST}:${PORT}                  ║
+║   API Base:  http://${HOST}:${PORT}/api/v1           ║
+║   Health:    http://${HOST}:${PORT}/health            ║
+║                                                   ║
+║   Features:                                       ║
+║     • Event ingestion & querying                  ║
+║     • Instance management & cleanup               ║
+║     • Resolve/unresolve events                    ║
+║     • DB archiving & log rotation                 ║
+║     • Full health API for automation              ║
+║                                                   ║
+╚═══════════════════════════════════════════════════╝
   `);
+});
+
+// ── Graceful Shutdown ─────────────────────────────────────
+
+function gracefulShutdown(signal: string): void {
+  console.log(`[BollaWatch] ${signal} received — shutting down gracefully...`);
+
+  clearInterval(cleanupTimer);
+
+  server.close(() => {
+    console.log('[BollaWatch] HTTP server closed');
+    closeDatabase();
+    console.log('[BollaWatch] Database closed');
+    process.exit(0);
+  });
+
+  // Force close after 10s
+  setTimeout(() => {
+    console.error('[BollaWatch] Forced shutdown after timeout');
+    process.exit(1);
+  }, 10000);
+}
+
+process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
+process.on('SIGINT', () => gracefulShutdown('SIGINT'));
+
+// Handle uncaught errors
+process.on('uncaughtException', (err) => {
+  console.error('[BollaWatch] Uncaught exception:', err);
+  // Don't crash — log and continue
+});
+
+process.on('unhandledRejection', (reason) => {
+  console.error('[BollaWatch] Unhandled rejection:', reason);
 });
