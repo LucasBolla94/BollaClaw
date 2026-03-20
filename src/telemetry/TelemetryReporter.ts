@@ -1,4 +1,6 @@
 import * as os from 'os';
+import * as fs from 'fs';
+import * as path from 'path';
 import * as crypto from 'crypto';
 import { config } from '../utils/config';
 import { logger } from '../utils/logger';
@@ -8,6 +10,7 @@ import { logger } from '../utils/logger';
 // ============================================================
 // Batches events in memory and flushes periodically or when
 // the batch is full. Non-blocking — never throws to caller.
+// Features: retry with backoff, version tracking, rich metadata.
 // ============================================================
 
 export type EventType =
@@ -46,10 +49,14 @@ interface MetricsSnapshot {
   active_conversations: number;
 }
 
+// ── Configuration ──────────────────────────────────────────
+
 const BATCH_SIZE = 50;
-const FLUSH_INTERVAL_MS = 15_000;   // 15s
-const METRICS_INTERVAL_MS = 60_000; // 1min
-const REQUEST_TIMEOUT_MS = 5_000;
+const FLUSH_INTERVAL_MS = 15_000;     // 15s
+const METRICS_INTERVAL_MS = 60_000;   // 1min
+const REQUEST_TIMEOUT_MS = 5_000;     // 5s
+const MAX_RETRY_BATCH = BATCH_SIZE * 3; // Max events in retry buffer
+const REGISTER_RETRY_INTERVAL = 30_000; // 30s retry registration
 
 class TelemetryReporterClass {
   private instanceId: string;
@@ -58,7 +65,11 @@ class TelemetryReporterClass {
   private batch: TelemetryEvent[] = [];
   private flushTimer: ReturnType<typeof setInterval> | null = null;
   private metricsTimer: ReturnType<typeof setInterval> | null = null;
+  private registerTimer: ReturnType<typeof setInterval> | null = null;
   private registered = false;
+  private consecutiveFailures = 0;
+  private lastFlushSuccess = true;
+  private version: string;
 
   // Counters for metrics
   private counters = {
@@ -73,6 +84,7 @@ class TelemetryReporterClass {
     this.instanceId = this.getOrCreateInstanceId();
     this.hubUrl = process.env.BOLLAWATCH_URL || 'http://server2.bolla.network:21087';
     this.enabled = this.hubUrl !== 'disabled';
+    this.version = this.getVersion();
   }
 
   // ── Initialization ─────────────────────────────────────
@@ -83,10 +95,13 @@ class TelemetryReporterClass {
       return;
     }
 
-    logger.info(`[Telemetry] Reporting to ${this.hubUrl}`);
+    logger.info(`[Telemetry] Reporting to ${this.hubUrl} (instance: ${this.instanceId})`);
 
-    // Register this instance
+    // Register this instance (with retry)
     this.register();
+    this.registerTimer = setInterval(() => {
+      if (!this.registered) this.register();
+    }, REGISTER_RETRY_INTERVAL);
 
     // Start periodic flush
     this.flushTimer = setInterval(() => this.flush(), FLUSH_INTERVAL_MS);
@@ -94,7 +109,7 @@ class TelemetryReporterClass {
     // Start periodic metrics
     this.metricsTimer = setInterval(() => this.sendMetrics(), METRICS_INTERVAL_MS);
 
-    // Report startup
+    // Report startup event
     this.track({
       type: 'startup',
       severity: 'info',
@@ -104,11 +119,15 @@ class TelemetryReporterClass {
         platform: os.platform(),
         arch: os.arch(),
         node_version: process.version,
+        npm_version: process.env.npm_package_version || 'unknown',
+        bollaclaw_version: this.version,
         total_memory_mb: Math.round(os.totalmem() / 1024 / 1024),
+        cpu_cores: os.cpus().length,
+        cpu_model: os.cpus()[0]?.model || 'unknown',
       },
     });
 
-    // Graceful shutdown
+    // Graceful shutdown handlers
     process.on('SIGTERM', () => this.shutdown());
     process.on('SIGINT', () => this.shutdown());
   }
@@ -116,7 +135,23 @@ class TelemetryReporterClass {
   stop(): void {
     if (this.flushTimer) clearInterval(this.flushTimer);
     if (this.metricsTimer) clearInterval(this.metricsTimer);
+    if (this.registerTimer) clearInterval(this.registerTimer);
+    this.flushTimer = null;
+    this.metricsTimer = null;
+    this.registerTimer = null;
     this.flush(); // Final flush
+  }
+
+  isEnabled(): boolean {
+    return this.enabled;
+  }
+
+  isConnected(): boolean {
+    return this.enabled && this.registered && this.lastFlushSuccess;
+  }
+
+  getInstanceId(): string {
+    return this.instanceId;
   }
 
   // ── Event Tracking ─────────────────────────────────────
@@ -148,8 +183,12 @@ class TelemetryReporterClass {
       severity: 'error',
       category: category || 'uncaught',
       message: err.message,
-      stack_trace: err.stack,
-      data,
+      stack_trace: err.stack?.substring(0, 5000),
+      data: {
+        ...data,
+        error_name: err.name,
+        bollaclaw_version: this.version,
+      },
     });
   }
 
@@ -159,9 +198,14 @@ class TelemetryReporterClass {
       type: 'message',
       severity: 'info',
       category: 'user_message',
-      message: `Message from ${userId} (${messageLength} chars)`,
+      message: `Message processed (${messageLength} chars, ${durationMs}ms)`,
       duration_ms: durationMs,
-      data: { user_id: userId, message_length: messageLength, provider },
+      data: {
+        user_id: userId,
+        message_length: messageLength,
+        provider,
+        active_conversations: this.counters.activeConversations.size,
+      },
     });
   }
 
@@ -181,9 +225,15 @@ class TelemetryReporterClass {
       type: 'agent_loop',
       severity: reachedEnd ? 'info' : 'warn',
       category: 'agent_loop',
-      message: `AgentLoop: ${iteration}/${maxIterations} iterations, ${toolCalls} tool calls`,
+      message: `AgentLoop: ${iteration}/${maxIterations} iterations, ${toolCalls} tool calls (${durationMs}ms)`,
       duration_ms: durationMs,
-      data: { iteration, max_iterations: maxIterations, tool_calls: toolCalls, reached_end: reachedEnd },
+      data: {
+        iteration,
+        max_iterations: maxIterations,
+        tool_calls: toolCalls,
+        reached_end: reachedEnd,
+        avg_ms_per_iteration: iteration > 0 ? Math.round(durationMs / iteration) : 0,
+      },
     });
   }
 
@@ -194,7 +244,13 @@ class TelemetryReporterClass {
       category: provider,
       message: `${provider}/${model}: ${success ? 'ok' : 'failed'} (${durationMs}ms)`,
       duration_ms: durationMs,
-      data: { provider, model, success, token_estimate: tokenEstimate },
+      data: {
+        provider,
+        model,
+        success,
+        token_estimate: tokenEstimate,
+        bollaclaw_version: this.version,
+      },
     });
   }
 
@@ -211,12 +267,21 @@ class TelemetryReporterClass {
         instance_id: this.instanceId,
         events,
       });
-    } catch (err) {
-      // Put events back (but cap to avoid memory leak)
-      if (this.batch.length < BATCH_SIZE * 3) {
+      this.consecutiveFailures = 0;
+      this.lastFlushSuccess = true;
+    } catch {
+      this.consecutiveFailures++;
+      this.lastFlushSuccess = false;
+
+      // Put events back (capped to prevent memory leak)
+      if (this.batch.length + events.length <= MAX_RETRY_BATCH) {
         this.batch = [...events, ...this.batch];
       }
-      // Don't log to avoid infinite loop if logger triggers telemetry
+
+      // Log only first failure and then every 10th to avoid spam
+      if (this.consecutiveFailures === 1 || this.consecutiveFailures % 10 === 0) {
+        logger.warn(`[Telemetry] Flush failed (${this.consecutiveFailures} consecutive failures)`);
+      }
     }
   }
 
@@ -230,13 +295,14 @@ class TelemetryReporterClass {
       let modelName = '';
       try {
         providerName = config.llm.provider;
-      } catch {}
+        modelName = (config.llm as Record<string, string>).model || '';
+      } catch { /* config not ready yet */ }
 
       await this.post('/api/v1/register', {
         instance_id: this.instanceId,
         name: 'BollaClaw',
         hostname: os.hostname(),
-        version: '0.1.0',
+        version: this.version,
         provider: providerName,
         model: modelName,
         server_url: os.hostname(),
@@ -244,28 +310,32 @@ class TelemetryReporterClass {
           platform: os.platform(),
           arch: os.arch(),
           cpus: os.cpus().length,
+          cpu_model: os.cpus()[0]?.model || 'unknown',
           total_memory_mb: Math.round(os.totalmem() / 1024 / 1024),
+          node_version: process.version,
+          bollaclaw_version: this.version,
         },
       });
 
       this.registered = true;
+      logger.info('[Telemetry] Registered with BollaWatch hub');
     } catch {
-      // Will retry on next flush
+      // Will retry via interval
     }
   }
 
   // ── Metrics ────────────────────────────────────────────
 
   private async sendMetrics(): Promise<void> {
-    if (!this.registered) await this.register();
+    if (!this.registered) return; // Don't send metrics until registered
 
     const cpus = os.cpus();
     const totalMem = os.totalmem();
     const freeMem = os.freemem();
     const usedMem = totalMem - freeMem;
 
-    // CPU usage (rough estimate from load average)
-    const loadAvg = os.loadavg()[0]; // 1 min avg
+    // CPU usage from load average
+    const loadAvg = os.loadavg()[0];
     const cpuPercent = Math.min(100, (loadAvg / cpus.length) * 100);
 
     const avgResponseMs = this.counters.responseTimes.length > 0
@@ -291,7 +361,7 @@ class TelemetryReporterClass {
     try {
       await this.post('/api/v1/metrics', metrics);
     } catch {
-      // Silent fail
+      // Silent fail for metrics
     }
   }
 
@@ -302,7 +372,13 @@ class TelemetryReporterClass {
       type: 'shutdown',
       severity: 'info',
       message: 'BollaClaw shutting down',
-      data: { uptime_seconds: Math.round(process.uptime()) },
+      data: {
+        uptime_seconds: Math.round(process.uptime()),
+        messages_processed: this.counters.messagesProcessed,
+        tool_calls_total: this.counters.toolCallsTotal,
+        errors_total: this.counters.errorsTotal,
+        bollaclaw_version: this.version,
+      },
     });
     await this.flush();
     this.stop();
@@ -310,8 +386,8 @@ class TelemetryReporterClass {
 
   // ── HTTP helper ────────────────────────────────────────
 
-  private async post(path: string, body: unknown): Promise<void> {
-    const url = `${this.hubUrl}${path}`;
+  private async post(urlPath: string, body: unknown): Promise<void> {
+    const url = `${this.hubUrl}${urlPath}`;
 
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
@@ -332,16 +408,29 @@ class TelemetryReporterClass {
     }
   }
 
-  // ── Instance ID (persistent across restarts) ───────────
+  // ── Instance ID (stable across restarts) ───────────────
 
   private getOrCreateInstanceId(): string {
-    // Use hostname + a hash to create a stable ID
     const hostname = os.hostname();
     const hash = crypto.createHash('sha256')
       .update(hostname + '__bollaclaw__' + (process.env.TELEGRAM_BOT_TOKEN || ''))
       .digest('hex')
       .substring(0, 12);
     return `bc-${hostname}-${hash}`;
+  }
+
+  // ── Version tracking ───────────────────────────────────
+
+  private getVersion(): string {
+    try {
+      // Try to read version from package.json
+      const pkgPath = path.resolve(__dirname, '../../package.json');
+      if (fs.existsSync(pkgPath)) {
+        const pkg = JSON.parse(fs.readFileSync(pkgPath, 'utf-8'));
+        return pkg.version || '0.0.0';
+      }
+    } catch { /* fallback */ }
+    return '0.0.0';
   }
 }
 
