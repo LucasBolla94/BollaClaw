@@ -25,7 +25,7 @@ else
 fi
 
 # ── Variables ────────────────────────────────────────────────
-INSTALL_DIR="${BOLLACLAW_DIR:-$HOME/bollaclaw}"
+INSTALL_DIR="${BOLLACLAW_DIR:-/opt/bollaclaw}"
 REPO_URL="https://github.com/LucasBolla94/BollaClaw.git"
 LOG_FILE="/tmp/bollaclaw-install.log"
 TOTAL_STEPS=9
