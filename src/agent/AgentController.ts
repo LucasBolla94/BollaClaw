@@ -8,6 +8,8 @@ import { SkillRouter } from '../skills/SkillRouter';
 import { SkillExecutor } from '../skills/SkillExecutor';
 import { SkillInstaller } from '../skills/SkillInstaller';
 import { AgentLoop, AgentResult } from './AgentLoop';
+import { ThinkingEngine } from './ThinkingEngine';
+import { HookManager, createDefaultHookManager } from '../hooks/HookManager';
 import { AgentOrchestrator } from '../orchestrator/AgentOrchestrator';
 import { OnboardManager, IdentityConfig } from '../onboard/OnboardManager';
 import { SoulEngine } from '../soul/SoulEngine';
@@ -23,6 +25,8 @@ export class AgentController {
   private skillExecutor: SkillExecutor;
   private skillInstaller: SkillInstaller;
   private orchestrator: AgentOrchestrator;
+  private thinkingEngine: ThinkingEngine;
+  private hookManager: HookManager;
   private onboardManager: OnboardManager;
   private soulEngine: SoulEngine;
   private soulBootstrap: SoulBootstrap;
@@ -37,6 +41,8 @@ export class AgentController {
     this.skillExecutor = new SkillExecutor();
     this.skillInstaller = new SkillInstaller();
     this.orchestrator = new AgentOrchestrator(this.toolRegistry);
+    this.thinkingEngine = new ThinkingEngine(); // Adaptive mode by default
+    this.hookManager = createDefaultHookManager();
     this.onboardManager = new OnboardManager();
 
     // Soul system — data dir is ./data relative to cwd
@@ -288,7 +294,7 @@ Data/hora atual: ${now}`;
     userId: string
   ): Promise<AgentResult> {
     try {
-      const loop = new AgentLoop(provider, this.toolRegistry);
+      const loop = new AgentLoop(provider, this.toolRegistry, this.hookManager, this.thinkingEngine);
       return await loop.run(messages, systemPrompt, requiresAudioReply);
     } catch (err) {
       logger.warn(`Primary provider failed, trying fallback: ${err}`);
@@ -297,7 +303,7 @@ Data/hora atual: ${now}`;
         user_id: userId,
       });
       return await ProviderFactory.withFallback(async (fallbackProvider) => {
-        const loop = new AgentLoop(fallbackProvider, this.toolRegistry);
+        const loop = new AgentLoop(fallbackProvider, this.toolRegistry, this.hookManager, this.thinkingEngine);
         return loop.run(messages, systemPrompt, requiresAudioReply);
       });
     }
@@ -328,7 +334,7 @@ Data/hora atual: ${now}`;
   }
 
   reloadSkills(): void {
-    const builtinTools = ['create_file', 'read_file', 'get_datetime', 'create_skill', 'list_skills', 'delete_skill', 'validate_skill'];
+    const builtinTools = ['create_file', 'read_file', 'get_datetime', 'create_skill', 'list_skills', 'delete_skill', 'validate_skill', 'shell_exec', 'run_code'];
     const currentTools = this.toolRegistry.listNames();
     for (const toolName of currentTools) {
       if (!builtinTools.includes(toolName)) {

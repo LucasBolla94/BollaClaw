@@ -6,6 +6,7 @@ import { CreateSkillTool } from './builtin/CreateSkillTool';
 import { ListSkillsTool } from './builtin/ListSkillsTool';
 import { DeleteSkillTool } from './builtin/DeleteSkillTool';
 import { ValidateSkillTool } from './builtin/ValidateSkillTool';
+import { ShellTool, CodeRunnerTool } from './builtin/ShellTool';
 import { ToolDefinition } from '../providers/ILlmProvider';
 import { logger } from '../utils/logger';
 
@@ -23,6 +24,10 @@ export class ToolRegistry {
     this.register(new ListSkillsTool());
     this.register(new DeleteSkillTool());
     this.register(new ValidateSkillTool());
+
+    // Sandbox execution tools
+    this.register(new ShellTool());
+    this.register(new CodeRunnerTool());
 
     logger.info(`ToolRegistry initialized with ${this.tools.size} built-in tools`);
   }
