@@ -332,12 +332,17 @@ export function createAdminServer(controller: AgentController): express.Applicat
   });
 
   // ── Static assets with cache control ───────────────────────
-  app.use(express.static(path.join(__dirname, 'public'), {
+  // Prefer Next.js export build (webpanel/out), fallback to legacy public/
+  const nextExportDir = path.resolve(__dirname, '../../webpanel/out');
+  const legacyPublicDir = path.join(__dirname, 'public');
+  const staticDir = fs.existsSync(nextExportDir) ? nextExportDir : legacyPublicDir;
+
+  app.use(express.static(staticDir, {
     maxAge: '1h',
     etag: true,
     lastModified: true,
     dotfiles: 'deny',
-    index: false, // We handle index via SPA fallback
+    index: 'index.html',
   }));
 
   // Ensure credentials exist
@@ -761,7 +766,8 @@ export function createAdminServer(controller: AgentController): express.Applicat
 
   // ── SPA fallback ──────────────────────────────────────────
   app.get('*', (_req: Request, res: Response) => {
-    res.sendFile(path.join(__dirname, 'public', 'index.html'));
+    const indexPath = path.join(staticDir, 'index.html');
+    res.sendFile(indexPath);
   });
 
   return app;
