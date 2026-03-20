@@ -161,11 +161,11 @@ export class AutoUpdater {
     try {
       logger.info('[AutoUpdater] Applying update...');
 
-      // 1. Stash any local changes (shouldn't have any, but safety)
+      // 1. Reset local changes (package-lock etc) to avoid merge conflicts
       try {
-        this.execGit('stash --quiet');
+        this.execGit('reset --hard HEAD');
       } catch {
-        // No changes to stash, that's fine
+        // Ignore if nothing to reset
       }
 
       // 2. Pull from remote

@@ -266,7 +266,7 @@ fi
 # ══════════════════════════════════════════════════════════════
 step_header "Código-fonte BollaClaw" "📂"
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd || echo "")"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-}")" 2>/dev/null && pwd || echo "")"
 if [ -n "$SCRIPT_DIR" ] && [ -f "$SCRIPT_DIR/../package.json" ]; then
   INSTALL_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
   ok "Usando repositório local: ${C}$INSTALL_DIR${NC}"
@@ -274,6 +274,7 @@ if [ -n "$SCRIPT_DIR" ] && [ -f "$SCRIPT_DIR/../package.json" ]; then
 elif [ -d "$INSTALL_DIR/.git" ]; then
   info "Repositório existente — atualizando..."
   cd "$INSTALL_DIR"
+  git reset --hard HEAD >/dev/null 2>&1
   run_step "git pull" git pull --ff-only 2>/dev/null || {
     warn "Conflito no git — fazendo backup e re-clone..."
     cd "$HOME"

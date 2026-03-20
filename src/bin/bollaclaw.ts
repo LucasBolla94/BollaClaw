@@ -428,6 +428,8 @@ async function cmdUpdate(_args: string[]) {
     console.log(`  ${DIM}├─${NC} ${Y}${behind} commit(s) disponíveis${NC}`);
     console.log(`  ${DIM}├─${NC} Aplicando atualização...`);
 
+    // Reset local changes (package-lock etc) to avoid merge conflicts
+    execSync('git reset --hard HEAD', { cwd: projectRoot, timeout: 10000 });
     execSync(`git pull origin ${branch} --quiet`, { cwd: projectRoot, timeout: 30000 });
     console.log(`  ${DIM}├─${NC} ${G}✔ Pull OK${NC}`);
 
@@ -439,8 +441,15 @@ async function cmdUpdate(_args: string[]) {
 
     const newCommit = execSync('git rev-parse HEAD', { encoding: 'utf-8', cwd: projectRoot }).trim();
     console.log(`  ${DIM}├─${NC} Novo commit: ${G}${newCommit.substring(0, 8)}${NC}`);
-    console.log(`  ${DIM}└─${NC} ${G}✔ Atualização concluída!${NC}`);
-    console.log(`\n  ${Y}⚠${NC}  Execute ${C}bollaclaw restart${NC} para aplicar.\n`);
+    console.log(`  ${DIM}├─${NC} ${G}✔ Atualização concluída!${NC}`);
+    console.log(`  ${DIM}├─${NC} Reiniciando via PM2...`);
+
+    try {
+      execSync('pm2 restart bollaclaw --update-env', { cwd: projectRoot, timeout: 15000 });
+      console.log(`  ${DIM}└─${NC} ${G}✔ Reiniciado com sucesso!${NC}\n`);
+    } catch {
+      console.log(`  ${DIM}└─${NC} ${Y}⚠ PM2 restart falhou. Execute: bollaclaw restart${NC}\n`);
+    }
 
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : String(err);
