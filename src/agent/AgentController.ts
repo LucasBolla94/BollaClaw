@@ -1,4 +1,5 @@
 import { ProviderFactory } from '../providers/ProviderFactory';
+import { ILlmProvider, Message } from '../providers/ILlmProvider';
 import { ToolRegistry } from '../tools/ToolRegistry';
 import { ScriptTool } from '../tools/ScriptTool';
 import { MemoryManager } from '../memory/MemoryManager';
@@ -7,6 +8,7 @@ import { SkillRouter } from '../skills/SkillRouter';
 import { SkillExecutor } from '../skills/SkillExecutor';
 import { SkillInstaller } from '../skills/SkillInstaller';
 import { AgentLoop, AgentResult } from './AgentLoop';
+import { AgentOrchestrator } from '../orchestrator/AgentOrchestrator';
 import { OnboardManager, IdentityConfig } from '../onboard/OnboardManager';
 import { SoulEngine } from '../soul/SoulEngine';
 import { SoulBootstrap } from '../soul/SoulBootstrap';
@@ -20,6 +22,7 @@ export class AgentController {
   private skillLoader: SkillLoader;
   private skillExecutor: SkillExecutor;
   private skillInstaller: SkillInstaller;
+  private orchestrator: AgentOrchestrator;
   private onboardManager: OnboardManager;
   private soulEngine: SoulEngine;
   private soulBootstrap: SoulBootstrap;
@@ -33,6 +36,7 @@ export class AgentController {
     this.skillLoader = new SkillLoader();
     this.skillExecutor = new SkillExecutor();
     this.skillInstaller = new SkillInstaller();
+    this.orchestrator = new AgentOrchestrator(this.toolRegistry);
     this.onboardManager = new OnboardManager();
 
     // Soul system — data dir is ./data relative to cwd
@@ -220,22 +224,45 @@ Data/hora atual: ${now}`;
       systemPrompt += `\n\nFerramentas disponíveis: ${toolNames.join(', ')}`;
     }
 
-    // Run agent loop (with fallback if primary provider fails)
+    // ── Multi-Agent Orchestration ──────────────────────────────
+    // The orchestrator analyzes the request and decides:
+    //   - 'direct': Simple task → use normal AgentLoop
+    //   - 'single_delegate'/'multi_delegate': Complex → create sub-agents
     let result: AgentResult;
     const processStart = Date.now();
+
     try {
-      const loop = new AgentLoop(provider, this.toolRegistry);
-      result = await loop.run(messages, systemPrompt, requiresAudioReply);
+      const orchResult = await this.orchestrator.process(
+        userMessage,
+        systemPrompt,
+        messages,
+        provider
+      );
+
+      if (orchResult.delegated && orchResult.answer) {
+        // Orchestrator handled it with sub-agents
+        logger.info(`[AgentController] Orchestrator delegated: ${orchResult.metrics.strategy} (${orchResult.metrics.subtaskCount} subtasks, ${orchResult.metrics.totalDurationMs}ms)`);
+        result = {
+          answer: orchResult.answer,
+          isFileOutput: false,
+          isAudioOutput: requiresAudioReply,
+        };
+
+        // Check for file output pattern in orchestrated answer
+        const fileMatch = orchResult.answer.match(/\[FILE:([^\]]+)\]/);
+        if (fileMatch) {
+          result.answer = orchResult.answer.replace(fileMatch[0], '').trim();
+          result.isFileOutput = true;
+          result.filePath = fileMatch[1];
+        }
+      } else {
+        // Direct handling — use normal AgentLoop
+        result = await this.runAgentLoop(provider, providerName, messages, systemPrompt, requiresAudioReply, userId);
+      }
     } catch (err) {
-      logger.warn(`Primary provider failed, trying fallback: ${err}`);
-      telemetry.trackError(err instanceof Error ? err : new Error(String(err)), 'primary_provider_failed', {
-        provider: providerName,
-        user_id: userId,
-      });
-      result = await ProviderFactory.withFallback(async (fallbackProvider) => {
-        const loop = new AgentLoop(fallbackProvider, this.toolRegistry);
-        return loop.run(messages, systemPrompt, requiresAudioReply);
-      });
+      // Orchestrator failed — fallback to direct AgentLoop
+      logger.warn(`Orchestrator failed, falling back to direct: ${err}`);
+      result = await this.runAgentLoop(provider, providerName, messages, systemPrompt, requiresAudioReply, userId);
     }
 
     // Track message processing
@@ -246,6 +273,34 @@ Data/hora atual: ${now}`;
     this.memoryManager.saveAssistantReply(conversationId, result.answer);
 
     return result;
+  }
+
+  /**
+   * Run the standard AgentLoop (single-agent ReAct loop)
+   * Used for direct handling or as fallback when orchestrator fails
+   */
+  private async runAgentLoop(
+    provider: ILlmProvider,
+    providerName: string,
+    messages: Message[],
+    systemPrompt: string,
+    requiresAudioReply: boolean,
+    userId: string
+  ): Promise<AgentResult> {
+    try {
+      const loop = new AgentLoop(provider, this.toolRegistry);
+      return await loop.run(messages, systemPrompt, requiresAudioReply);
+    } catch (err) {
+      logger.warn(`Primary provider failed, trying fallback: ${err}`);
+      telemetry.trackError(err instanceof Error ? err : new Error(String(err)), 'primary_provider_failed', {
+        provider: providerName,
+        user_id: userId,
+      });
+      return await ProviderFactory.withFallback(async (fallbackProvider) => {
+        const loop = new AgentLoop(fallbackProvider, this.toolRegistry);
+        return loop.run(messages, systemPrompt, requiresAudioReply);
+      });
+    }
   }
 
   private buildSkillPrompt(basePrompt: string, skill: Skill): string {
@@ -322,6 +377,7 @@ Data/hora atual: ${now}`;
         runtime: s.runtime,
       })),
       tools: this.toolRegistry.listNames(),
+      orchestrator: this.orchestrator.getStatus(),
     };
   }
 }

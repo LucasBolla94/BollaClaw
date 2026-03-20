@@ -18,6 +18,7 @@ export type EventType =
   | 'message'         // User message processed
   | 'tool_call'       // Tool execution
   | 'agent_loop'      // AgentLoop iteration details
+  | 'agent_event'     // Sub-agent and orchestrator events
   | 'provider_call'   // LLM API call
   | 'startup'         // Bot started
   | 'shutdown'        // Bot stopping
