@@ -315,17 +315,43 @@ run_step "Registrando comando global 'bollaclaw'" sudo npm link --silent
 ok "Comando ${C}bollaclaw${NC} disponível globalmente"
 
 # ══════════════════════════════════════════════════════════════
-# STEP 9 — Setup Wizard
+# STEP 9 — Setup Wizard + Admin Password
 # ══════════════════════════════════════════════════════════════
 step_header "Configuração do bot" "⚙️"
+
+# ── Generate admin password for web panel ──
+ADMIN_PASSWORD=$(openssl rand -base64 16 | tr -d '/+=' | head -c 16)
+ADMIN_PORT="${ADMIN_PORT:-3001}"
 
 if [ ! -f ".env" ]; then
   echo ""
   info "Responda as perguntas abaixo para configurar o bot."
   echo ""
   node dist/onboard/cli.js </dev/tty
+
+  # Append web panel credentials to .env
+  if [ -f ".env" ]; then
+    echo "" >> .env
+    echo "# ── Web Panel (Admin Dashboard) ──────────────────────" >> .env
+    echo "ADMIN_PASSWORD=${ADMIN_PASSWORD}" >> .env
+    echo "ADMIN_PORT=${ADMIN_PORT}" >> .env
+    ok "Credenciais do painel web geradas"
+  fi
 else
   ok "Configuração existente ${C}.env${NC} detectada"
+
+  # Ensure ADMIN_PASSWORD exists in .env
+  if ! grep -q "ADMIN_PASSWORD" .env 2>/dev/null; then
+    echo "" >> .env
+    echo "# ── Web Panel (Admin Dashboard) ──────────────────────" >> .env
+    echo "ADMIN_PASSWORD=${ADMIN_PASSWORD}" >> .env
+    echo "ADMIN_PORT=${ADMIN_PORT}" >> .env
+    ok "Credenciais do painel web adicionadas ao .env"
+  else
+    ADMIN_PASSWORD=$(grep "ADMIN_PASSWORD" .env | cut -d'=' -f2)
+    ok "Credenciais do painel web já configuradas"
+  fi
+
   echo ""
   printf "    Reconfigurar? ${DIM}(s/N):${NC} "
   read -r RECONFIG </dev/tty || RECONFIG="n"
@@ -390,11 +416,23 @@ kv "Erros"       "$( [ $ERRORS -eq 0 ] && printf "${G}0${NC}" || printf "${R}${E
 kv "Avisos"      "$( [ $WARNINGS -eq 0 ] && printf "${G}0${NC}" || printf "${Y}${WARNINGS}${NC}" )"
 echo ""
 
+# ── Web Panel
+printf "  ${W}PAINEL WEB${NC}\n\n"
+printf "    ${C}Endereço local:${NC}  http://localhost:${ADMIN_PORT}\n"
+printf "    ${C}Senha inicial:${NC}   ${Y}${BOLD}${ADMIN_PASSWORD}${NC}\n"
+printf "    ${DIM}Troque a senha no primeiro login!${NC}\n"
+echo ""
+printf "    ${DIM}Acesso remoto (VPS via SSH tunnel):${NC}\n"
+printf "    ${C}ssh -L ${ADMIN_PORT}:localhost:${ADMIN_PORT} $(whoami)@$(hostname -I 2>/dev/null | awk '{print $1}' || echo 'SEU_IP')${NC}\n"
+printf "    ${DIM}Depois abra: http://localhost:${ADMIN_PORT}${NC}\n"
+echo ""
+
 # ── Commands
 printf "  ${W}COMANDOS${NC}\n\n"
 printf "    ${C}bollaclaw status${NC}           Estado do bot\n"
 printf "    ${C}bollaclaw models${NC}           Modelos de IA\n"
 printf "    ${C}bollaclaw soul${NC}             Personalidade\n"
+printf "    ${C}bollaclaw web${NC}              Painel admin\n"
 printf "    ${C}bollaclaw add <CODE>${NC}       Aprovar usuário\n"
 printf "    ${C}bollaclaw users${NC}            Listar usuários\n"
 printf "    ${C}bollaclaw update${NC}           Atualizar do GitHub\n"

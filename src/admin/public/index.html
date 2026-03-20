@@ -3,194 +3,1065 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>BollaClaw Admin</title>
+  <title>BollaClaw — Web Panel</title>
   <style>
+    /* ═══════════════════════════════════════════════════════════
+       BollaClaw Web Panel — Dark Theme UI
+       ═══════════════════════════════════════════════════════════ */
+
     :root {
-      --bg: #0d1117; --surface: #161b22; --border: #30363d;
-      --text: #e6edf3; --muted: #8b949e; --green: #3fb950;
-      --blue: #58a6ff; --yellow: #d29922; --red: #f85149;
-      --accent: #1f6feb;
+      --bg:        #0a0e14;
+      --bg-alt:    #0d1117;
+      --surface:   #151b23;
+      --surface-2: #1c2333;
+      --border:    #262d3a;
+      --border-h:  #3d4663;
+      --text:      #e2e8f0;
+      --text-2:    #94a3b8;
+      --text-3:    #64748b;
+      --accent:    #6366f1;
+      --accent-h:  #818cf8;
+      --green:     #34d399;
+      --green-bg:  #34d39915;
+      --yellow:    #fbbf24;
+      --yellow-bg: #fbbf2415;
+      --red:       #f87171;
+      --red-bg:    #f8717115;
+      --blue:      #60a5fa;
+      --blue-bg:   #60a5fa15;
+      --cyan:      #22d3ee;
+      --radius:    10px;
+      --radius-sm: 6px;
+      --shadow:    0 1px 3px rgba(0,0,0,.3), 0 4px 12px rgba(0,0,0,.2);
+      --transition: .2s ease;
     }
+
     * { box-sizing: border-box; margin: 0; padding: 0; }
-    body { background: var(--bg); color: var(--text); font-family: 'Segoe UI', system-ui, sans-serif; font-size: 14px; }
-    header { background: var(--surface); border-bottom: 1px solid var(--border); padding: 12px 24px; display: flex; align-items: center; gap: 12px; }
-    header h1 { font-size: 18px; font-weight: 600; }
-    .badge { background: var(--green); color: #000; font-size: 11px; padding: 2px 8px; border-radius: 12px; font-weight: 700; }
-    .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 16px; padding: 20px 24px; }
-    .card { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 16px; }
-    .card h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .5px; color: var(--muted); margin-bottom: 12px; }
-    .stat { display: flex; justify-content: space-between; align-items: center; padding: 6px 0; border-bottom: 1px solid var(--border); }
-    .stat:last-child { border: none; }
-    .stat-value { font-weight: 600; color: var(--blue); }
-    .tag { display: inline-block; background: var(--accent); color: #fff; border-radius: 4px; padding: 2px 8px; font-size: 12px; margin: 2px; }
-    .log-box { background: #010409; border: 1px solid var(--border); border-radius: 6px; padding: 12px; height: 280px; overflow-y: auto; font-family: monospace; font-size: 12px; line-height: 1.6; }
-    .log-info { color: var(--green); }
-    .log-warn { color: var(--yellow); }
-    .log-error { color: var(--red); }
-    .log-debug { color: var(--muted); }
-    .full-width { grid-column: 1 / -1; }
-    .btn { background: var(--accent); color: #fff; border: none; border-radius: 6px; padding: 8px 16px; cursor: pointer; font-size: 13px; margin-top: 8px; }
-    .btn:hover { opacity: .85; }
-    .btn-red { background: #b91c1c; }
-    .skills-list { display: flex; flex-wrap: wrap; gap: 6px; }
-    .status-dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; margin-right: 6px; }
-    .dot-green { background: var(--green); }
-    #loginScreen { display: flex; align-items: center; justify-content: center; min-height: 100vh; flex-direction: column; gap: 16px; }
-    #loginScreen input { background: var(--surface); border: 1px solid var(--border); color: var(--text); border-radius: 6px; padding: 10px 14px; font-size: 14px; width: 260px; }
-    #loginScreen button { width: 260px; padding: 10px; font-size: 14px; }
+
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+      font-size: 14px;
+      line-height: 1.5;
+      overflow-x: hidden;
+    }
+
+    /* ── Scrollbar ─────────────────────────────────────────── */
+    ::-webkit-scrollbar { width: 6px; height: 6px; }
+    ::-webkit-scrollbar-track { background: transparent; }
+    ::-webkit-scrollbar-thumb { background: var(--border-h); border-radius: 3px; }
+    ::-webkit-scrollbar-thumb:hover { background: var(--text-3); }
+
+    /* ── Login Screen ──────────────────────────────────────── */
+    #loginScreen {
+      display: flex; align-items: center; justify-content: center;
+      min-height: 100vh; flex-direction: column; gap: 20px;
+      background: radial-gradient(ellipse at 50% 30%, #1e1b4b33 0%, transparent 60%), var(--bg);
+    }
+    .login-box {
+      background: var(--surface); border: 1px solid var(--border);
+      border-radius: 16px; padding: 40px; width: 380px; max-width: 90vw;
+      box-shadow: var(--shadow);
+    }
+    .login-logo {
+      text-align: center; margin-bottom: 24px;
+    }
+    .login-logo h1 { font-size: 24px; font-weight: 700; margin-top: 8px; }
+    .login-logo p { color: var(--text-3); font-size: 13px; margin-top: 4px; }
+    .login-logo .logo-icon { font-size: 40px; }
+
+    .form-group { margin-bottom: 16px; }
+    .form-group label {
+      display: block; font-size: 12px; font-weight: 600; color: var(--text-2);
+      margin-bottom: 6px; text-transform: uppercase; letter-spacing: .5px;
+    }
+    .form-input {
+      width: 100%; background: var(--bg-alt); border: 1px solid var(--border);
+      color: var(--text); border-radius: var(--radius-sm); padding: 10px 14px;
+      font-size: 14px; outline: none; transition: border var(--transition);
+    }
+    .form-input:focus { border-color: var(--accent); }
+    .form-input::placeholder { color: var(--text-3); }
+
+    .btn {
+      display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+      background: var(--accent); color: #fff; border: none; border-radius: var(--radius-sm);
+      padding: 10px 20px; font-size: 14px; font-weight: 600; cursor: pointer;
+      transition: all var(--transition); width: 100%;
+    }
+    .btn:hover { background: var(--accent-h); transform: translateY(-1px); }
+    .btn-sm { padding: 6px 14px; font-size: 12px; width: auto; }
+    .btn-ghost { background: transparent; border: 1px solid var(--border); color: var(--text-2); }
+    .btn-ghost:hover { border-color: var(--accent); color: var(--text); background: transparent; }
+    .btn-danger { background: var(--red); }
+    .btn-success { background: #059669; }
+
+    .login-error { color: var(--red); font-size: 12px; text-align: center; min-height: 18px; }
+
+    /* ── Change Password Modal ─────────────────────────────── */
+    .modal-overlay {
+      display: none; position: fixed; inset: 0;
+      background: rgba(0,0,0,.6); backdrop-filter: blur(4px);
+      z-index: 100; align-items: center; justify-content: center;
+    }
+    .modal-overlay.active { display: flex; }
+    .modal {
+      background: var(--surface); border: 1px solid var(--border);
+      border-radius: 16px; padding: 32px; width: 400px; max-width: 90vw;
+      box-shadow: var(--shadow);
+    }
+    .modal h2 { font-size: 18px; margin-bottom: 8px; }
+    .modal p { color: var(--text-2); font-size: 13px; margin-bottom: 20px; }
+
+    /* ── App Layout ────────────────────────────────────────── */
     #app { display: none; }
+    .layout { display: flex; min-height: 100vh; }
+
+    /* ── Sidebar ───────────────────────────────────────────── */
+    .sidebar {
+      width: 220px; background: var(--surface); border-right: 1px solid var(--border);
+      display: flex; flex-direction: column; flex-shrink: 0;
+      position: sticky; top: 0; height: 100vh; overflow-y: auto;
+    }
+    .sidebar-brand {
+      padding: 20px 16px; border-bottom: 1px solid var(--border);
+      display: flex; align-items: center; gap: 10px;
+    }
+    .sidebar-brand .brand-icon { font-size: 22px; }
+    .sidebar-brand h2 { font-size: 15px; font-weight: 700; }
+    .sidebar-brand span { font-size: 11px; color: var(--text-3); }
+
+    .sidebar-nav { padding: 12px 8px; flex: 1; }
+    .nav-section { margin-bottom: 16px; }
+    .nav-section-title {
+      font-size: 10px; font-weight: 700; text-transform: uppercase;
+      letter-spacing: 1px; color: var(--text-3); padding: 4px 12px; margin-bottom: 4px;
+    }
+    .nav-item {
+      display: flex; align-items: center; gap: 10px; padding: 8px 12px;
+      border-radius: var(--radius-sm); cursor: pointer; color: var(--text-2);
+      transition: all var(--transition); font-size: 13px; font-weight: 500;
+    }
+    .nav-item:hover { background: var(--surface-2); color: var(--text); }
+    .nav-item.active { background: var(--accent)20; color: var(--accent-h); }
+    .nav-item .icon { width: 18px; text-align: center; font-size: 15px; }
+
+    .sidebar-footer {
+      padding: 12px 16px; border-top: 1px solid var(--border);
+      font-size: 11px; color: var(--text-3);
+    }
+
+    /* ── Main Content ──────────────────────────────────────── */
+    .main { flex: 1; padding: 24px; overflow-y: auto; max-height: 100vh; }
+    .main-header {
+      display: flex; align-items: center; justify-content: space-between;
+      margin-bottom: 24px;
+    }
+    .main-header h1 { font-size: 22px; font-weight: 700; }
+    .main-header .subtitle { color: var(--text-3); font-size: 13px; margin-top: 2px; }
+    .page { display: none; }
+    .page.active { display: block; }
+
+    /* ── Cards ──────────────────────────────────────────────── */
+    .grid { display: grid; gap: 16px; }
+    .grid-2 { grid-template-columns: repeat(2, 1fr); }
+    .grid-3 { grid-template-columns: repeat(3, 1fr); }
+    .grid-4 { grid-template-columns: repeat(4, 1fr); }
+    @media (max-width: 1200px) { .grid-4 { grid-template-columns: repeat(2, 1fr); } }
+    @media (max-width: 900px) {
+      .grid-2, .grid-3, .grid-4 { grid-template-columns: 1fr; }
+      .sidebar { display: none; }
+    }
+
+    .card {
+      background: var(--surface); border: 1px solid var(--border);
+      border-radius: var(--radius); padding: 20px; transition: border var(--transition);
+    }
+    .card:hover { border-color: var(--border-h); }
+    .card-header {
+      display: flex; align-items: center; justify-content: space-between;
+      margin-bottom: 16px;
+    }
+    .card-title {
+      font-size: 12px; font-weight: 700; text-transform: uppercase;
+      letter-spacing: .5px; color: var(--text-3);
+    }
+
+    /* ── Stat Cards ────────────────────────────────────────── */
+    .stat-card { text-align: center; padding: 24px 16px; }
+    .stat-value { font-size: 28px; font-weight: 800; margin-bottom: 4px; }
+    .stat-label { font-size: 12px; color: var(--text-3); text-transform: uppercase; letter-spacing: .5px; }
+    .stat-sub { font-size: 11px; color: var(--text-3); margin-top: 4px; }
+
+    /* ── Progress Bars ─────────────────────────────────────── */
+    .progress-bar {
+      width: 100%; height: 6px; background: var(--border); border-radius: 3px;
+      overflow: hidden; margin-top: 8px;
+    }
+    .progress-fill {
+      height: 100%; border-radius: 3px; transition: width .5s ease;
+    }
+
+    /* ── Key-Value Rows ────────────────────────────────────── */
+    .kv-row {
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 10px 0; border-bottom: 1px solid var(--border);
+    }
+    .kv-row:last-child { border-bottom: none; }
+    .kv-key { color: var(--text-2); font-size: 13px; }
+    .kv-val { font-weight: 600; font-size: 13px; }
+
+    /* ── Tags ──────────────────────────────────────────────── */
+    .tag {
+      display: inline-block; padding: 3px 10px; border-radius: 20px;
+      font-size: 11px; font-weight: 600;
+    }
+    .tag-green { background: var(--green-bg); color: var(--green); }
+    .tag-yellow { background: var(--yellow-bg); color: var(--yellow); }
+    .tag-red { background: var(--red-bg); color: var(--red); }
+    .tag-blue { background: var(--blue-bg); color: var(--blue); }
+
+    /* ── Log Viewer ────────────────────────────────────────── */
+    .log-viewer {
+      background: var(--bg); border: 1px solid var(--border); border-radius: var(--radius-sm);
+      padding: 12px 16px; height: 400px; overflow-y: auto;
+      font-family: 'JetBrains Mono', 'Fira Code', 'Cascadia Code', monospace;
+      font-size: 12px; line-height: 1.8;
+    }
+    .log-line { white-space: pre-wrap; word-break: break-all; }
+    .log-time { color: var(--text-3); }
+    .log-level-info { color: var(--green); }
+    .log-level-warn { color: var(--yellow); }
+    .log-level-error { color: var(--red); }
+    .log-level-debug { color: var(--text-3); }
+
+    /* ── Conversations ─────────────────────────────────────── */
+    .conv-list { max-height: 500px; overflow-y: auto; }
+    .conv-item {
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 12px 16px; border-bottom: 1px solid var(--border);
+      cursor: pointer; transition: background var(--transition);
+    }
+    .conv-item:hover { background: var(--surface-2); }
+    .conv-user { font-weight: 600; }
+    .conv-meta { color: var(--text-3); font-size: 12px; }
+    .conv-badge {
+      background: var(--accent); color: #fff; font-size: 11px;
+      padding: 2px 8px; border-radius: 10px; font-weight: 700;
+    }
+
+    /* ── Messages ──────────────────────────────────────────── */
+    .msg-list { max-height: 500px; overflow-y: auto; padding: 16px; }
+    .msg-bubble {
+      max-width: 80%; padding: 10px 14px; border-radius: 12px;
+      margin-bottom: 8px; font-size: 13px; line-height: 1.5;
+    }
+    .msg-user {
+      background: var(--accent)30; margin-left: auto;
+      border-bottom-right-radius: 4px;
+    }
+    .msg-assistant {
+      background: var(--surface-2); margin-right: auto;
+      border-bottom-left-radius: 4px;
+    }
+    .msg-time { font-size: 10px; color: var(--text-3); margin-top: 4px; }
+
+    /* ── Soul Traits ───────────────────────────────────────── */
+    .trait-row {
+      display: flex; align-items: center; gap: 12px; margin-bottom: 10px;
+    }
+    .trait-name { width: 110px; font-size: 13px; color: var(--text-2); text-transform: capitalize; }
+    .trait-bar {
+      flex: 1; height: 8px; background: var(--border); border-radius: 4px;
+      overflow: hidden;
+    }
+    .trait-fill {
+      height: 100%; border-radius: 4px;
+      background: linear-gradient(90deg, var(--accent), var(--cyan));
+      transition: width .5s ease;
+    }
+    .trait-val { width: 40px; text-align: right; font-size: 13px; font-weight: 600; }
+
+    /* ── Toolbar ────────────────────────────────────────────── */
+    .toolbar {
+      display: flex; align-items: center; gap: 8px; margin-bottom: 16px;
+      flex-wrap: wrap;
+    }
+    .toolbar .spacer { flex: 1; }
+
+    /* ── Tutorial Box ──────────────────────────────────────── */
+    .tutorial-box {
+      background: var(--surface-2); border: 1px solid var(--accent)40;
+      border-radius: var(--radius); padding: 20px; margin-bottom: 20px;
+      border-left: 3px solid var(--accent);
+    }
+    .tutorial-box h3 { font-size: 15px; margin-bottom: 8px; }
+    .tutorial-box code {
+      background: var(--bg); padding: 2px 8px; border-radius: 4px;
+      font-family: monospace; font-size: 13px; color: var(--cyan);
+    }
+    .tutorial-box pre {
+      background: var(--bg); padding: 12px 16px; border-radius: var(--radius-sm);
+      margin: 8px 0; overflow-x: auto; font-size: 12px; line-height: 1.6;
+      color: var(--text-2);
+    }
+    .tutorial-box ol, .tutorial-box ul { padding-left: 20px; margin: 8px 0; }
+    .tutorial-box li { margin-bottom: 6px; color: var(--text-2); font-size: 13px; }
+
+    /* ── Empty state ───────────────────────────────────────── */
+    .empty-state {
+      text-align: center; padding: 40px; color: var(--text-3);
+    }
+    .empty-state .icon { font-size: 48px; margin-bottom: 12px; }
+    .empty-state h3 { font-size: 16px; color: var(--text-2); margin-bottom: 4px; }
+
+    /* ── Animations ────────────────────────────────────────── */
+    @keyframes fadeIn { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
+    .fade-in { animation: fadeIn .3s ease; }
+    @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: .5; } }
+    .pulse { animation: pulse 2s ease-in-out infinite; }
   </style>
 </head>
 <body>
 
+<!-- ═══════════════════════════════════════════════════════════
+     LOGIN
+     ═══════════════════════════════════════════════════════════ -->
 <div id="loginScreen">
-  <h2>🤖 BollaClaw Admin</h2>
-  <input type="password" id="pwdInput" placeholder="Password" onkeydown="if(event.key==='Enter')login()">
-  <button class="btn" onclick="login()">Entrar</button>
-  <p id="loginError" style="color:var(--red);font-size:12px"></p>
-</div>
-
-<div id="app">
-  <header>
-    <span>🤖</span>
-    <h1>BollaClaw Admin</h1>
-    <span class="badge" id="statusBadge">ONLINE</span>
-    <span style="margin-left:auto;color:var(--muted);font-size:12px" id="lastUpdate"></span>
-  </header>
-
-  <div class="grid">
-    <!-- System Info -->
-    <div class="card">
-      <h2>Sistema</h2>
-      <div class="stat"><span>CPU Usage</span><span class="stat-value" id="cpu">—</span></div>
-      <div class="stat"><span>RAM Usage</span><span class="stat-value" id="ram">—</span></div>
-      <div class="stat"><span>Uptime</span><span class="stat-value" id="uptime">—</span></div>
-      <div class="stat"><span>Node.js</span><span class="stat-value" id="nodeVer">—</span></div>
+  <div class="login-box fade-in">
+    <div class="login-logo">
+      <div class="logo-icon">🦞</div>
+      <h1>BollaClaw</h1>
+      <p>Web Panel — Entre para gerenciar seu agente</p>
     </div>
-
-    <!-- Bot Config -->
-    <div class="card">
-      <h2>Configuração</h2>
-      <div class="stat"><span>LLM Provider</span><span class="stat-value" id="provider">—</span></div>
-      <div class="stat"><span>STT Provider</span><span class="stat-value" id="sttProvider">—</span></div>
-      <div class="stat"><span>Max Iterations</span><span class="stat-value" id="maxIter">—</span></div>
-      <div class="stat"><span>Memory Window</span><span class="stat-value" id="memWindow">—</span></div>
+    <div class="form-group">
+      <label>Senha</label>
+      <input class="form-input" type="password" id="pwdInput" placeholder="Digite a senha do painel" autofocus
+             onkeydown="if(event.key==='Enter')login()">
     </div>
-
-    <!-- Skills -->
-    <div class="card">
-      <h2>Skills Ativas</h2>
-      <div class="skills-list" id="skillsList"><span style="color:var(--muted)">Loading...</span></div>
-      <button class="btn" onclick="reloadSkills()" style="margin-top:12px">🔄 Reload Skills</button>
-    </div>
-
-    <!-- Tools -->
-    <div class="card">
-      <h2>Ferramentas</h2>
-      <div class="skills-list" id="toolsList"><span style="color:var(--muted)">Loading...</span></div>
-    </div>
-
-    <!-- Logs -->
-    <div class="card full-width">
-      <h2>Logs em Tempo Real</h2>
-      <div class="log-box" id="logBox"></div>
-      <button class="btn" onclick="clearLogs()" style="margin-top:8px">Limpar</button>
-    </div>
+    <button class="btn" onclick="login()">Entrar</button>
+    <p class="login-error" id="loginError"></p>
   </div>
 </div>
 
+<!-- ═══════════════════════════════════════════════════════════
+     CHANGE PASSWORD MODAL
+     ═══════════════════════════════════════════════════════════ -->
+<div class="modal-overlay" id="changePwdModal">
+  <div class="modal fade-in">
+    <h2>🔐 Troque sua senha</h2>
+    <p>Esta é a senha padrão gerada na instalação. Por segurança, crie uma senha pessoal.</p>
+    <div class="form-group">
+      <label>Senha atual</label>
+      <input class="form-input" type="password" id="currentPwd" placeholder="Senha usada para entrar">
+    </div>
+    <div class="form-group">
+      <label>Nova senha</label>
+      <input class="form-input" type="password" id="newPwd" placeholder="Mínimo 6 caracteres">
+    </div>
+    <div class="form-group">
+      <label>Confirmar nova senha</label>
+      <input class="form-input" type="password" id="confirmPwd" placeholder="Repita a nova senha"
+             onkeydown="if(event.key==='Enter')changePassword()">
+    </div>
+    <div style="display:flex;gap:8px">
+      <button class="btn btn-success" onclick="changePassword()" style="flex:1">Salvar</button>
+      <button class="btn btn-ghost" onclick="closePwdModal()" style="flex:1">Depois</button>
+    </div>
+    <p class="login-error" id="changePwdError" style="margin-top:8px"></p>
+  </div>
+</div>
+
+<!-- ═══════════════════════════════════════════════════════════
+     APP
+     ═══════════════════════════════════════════════════════════ -->
+<div id="app">
+  <div class="layout">
+
+    <!-- Sidebar -->
+    <aside class="sidebar">
+      <div class="sidebar-brand">
+        <span class="brand-icon">🦞</span>
+        <div>
+          <h2>BollaClaw</h2>
+          <span>Web Panel</span>
+        </div>
+      </div>
+
+      <nav class="sidebar-nav">
+        <div class="nav-section">
+          <div class="nav-section-title">Principal</div>
+          <div class="nav-item active" onclick="showPage('dashboard')" data-page="dashboard">
+            <span class="icon">📊</span> Dashboard
+          </div>
+          <div class="nav-item" onclick="showPage('conversations')" data-page="conversations">
+            <span class="icon">💬</span> Conversas
+          </div>
+          <div class="nav-item" onclick="showPage('logs')" data-page="logs">
+            <span class="icon">📋</span> Logs
+          </div>
+        </div>
+
+        <div class="nav-section">
+          <div class="nav-section-title">Agente</div>
+          <div class="nav-item" onclick="showPage('soul')" data-page="soul">
+            <span class="icon">🧠</span> Soul
+          </div>
+          <div class="nav-item" onclick="showPage('memory')" data-page="memory">
+            <span class="icon">💾</span> Memória
+          </div>
+        </div>
+
+        <div class="nav-section">
+          <div class="nav-section-title">Sistema</div>
+          <div class="nav-item" onclick="showPage('settings')" data-page="settings">
+            <span class="icon">⚙️</span> Configuração
+          </div>
+          <div class="nav-item" onclick="showPage('access')" data-page="access">
+            <span class="icon">🌐</span> Acesso Remoto
+          </div>
+        </div>
+      </nav>
+
+      <div class="sidebar-footer">
+        <div id="sidebarStatus" class="pulse">Conectando...</div>
+      </div>
+    </aside>
+
+    <!-- Main Content -->
+    <main class="main">
+
+      <!-- ── DASHBOARD PAGE ──────────────────────────────── -->
+      <div class="page active" id="page-dashboard">
+        <div class="main-header">
+          <div>
+            <h1>Dashboard</h1>
+            <div class="subtitle" id="lastRefresh">Carregando...</div>
+          </div>
+          <div style="display:flex;gap:8px">
+            <button class="btn btn-sm btn-ghost" onclick="fetchAll()">🔄 Atualizar</button>
+          </div>
+        </div>
+
+        <!-- Stat cards -->
+        <div class="grid grid-4" style="margin-bottom:20px">
+          <div class="card stat-card">
+            <div class="stat-value" id="s-cpu" style="color:var(--cyan)">—</div>
+            <div class="stat-label">CPU</div>
+            <div class="progress-bar"><div class="progress-fill" id="s-cpu-bar" style="background:var(--cyan);width:0"></div></div>
+          </div>
+          <div class="card stat-card">
+            <div class="stat-value" id="s-ram" style="color:var(--accent-h)">—</div>
+            <div class="stat-label">RAM</div>
+            <div class="progress-bar"><div class="progress-fill" id="s-ram-bar" style="background:var(--accent-h);width:0"></div></div>
+          </div>
+          <div class="card stat-card">
+            <div class="stat-value" id="s-disk" style="color:var(--green)">—</div>
+            <div class="stat-label">Disco</div>
+            <div class="progress-bar"><div class="progress-fill" id="s-disk-bar" style="background:var(--green);width:0"></div></div>
+          </div>
+          <div class="card stat-card">
+            <div class="stat-value" id="s-uptime" style="color:var(--yellow)">—</div>
+            <div class="stat-label">Uptime</div>
+            <div class="stat-sub" id="s-process-uptime">—</div>
+          </div>
+        </div>
+
+        <!-- Info cards -->
+        <div class="grid grid-3" style="margin-bottom:20px">
+          <div class="card">
+            <div class="card-header"><span class="card-title">🤖 Agente</span><span class="tag tag-green" id="d-agent-status">—</span></div>
+            <div class="kv-row"><span class="kv-key">Nome</span><span class="kv-val" id="d-agent-name">—</span></div>
+            <div class="kv-row"><span class="kv-key">Dono</span><span class="kv-val" id="d-agent-owner">—</span></div>
+            <div class="kv-row"><span class="kv-key">Provider</span><span class="kv-val" id="d-provider">—</span></div>
+            <div class="kv-row"><span class="kv-key">Soul</span><span class="kv-val" id="d-soul-status">—</span></div>
+            <div class="kv-row"><span class="kv-key">Conversas</span><span class="kv-val" id="d-conv-count">—</span></div>
+          </div>
+
+          <div class="card">
+            <div class="card-header"><span class="card-title">📡 Sistema</span></div>
+            <div class="kv-row"><span class="kv-key">Hostname</span><span class="kv-val" id="d-hostname">—</span></div>
+            <div class="kv-row"><span class="kv-key">Node.js</span><span class="kv-val" id="d-node">—</span></div>
+            <div class="kv-row"><span class="kv-key">CPU</span><span class="kv-val" id="d-cpu-model">—</span></div>
+            <div class="kv-row"><span class="kv-key">Cores</span><span class="kv-val" id="d-cpu-cores">—</span></div>
+            <div class="kv-row"><span class="kv-key">PID</span><span class="kv-val" id="d-pid">—</span></div>
+          </div>
+
+          <div class="card">
+            <div class="card-header"><span class="card-title">🔀 Git</span></div>
+            <div class="kv-row"><span class="kv-key">Branch</span><span class="kv-val" id="d-branch">—</span></div>
+            <div class="kv-row"><span class="kv-key">Commit</span><span class="kv-val" id="d-commit">—</span></div>
+            <div class="kv-row"><span class="kv-key">Last Msg</span><span class="kv-val" id="d-commit-msg" style="font-size:11px;max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">—</span></div>
+            <div class="kv-row"><span class="kv-key">PM2 Status</span><span class="kv-val" id="d-pm2-status">—</span></div>
+            <div class="kv-row"><span class="kv-key">PM2 Restarts</span><span class="kv-val" id="d-pm2-restarts">—</span></div>
+          </div>
+        </div>
+
+        <!-- Skills & Tools -->
+        <div class="grid grid-2">
+          <div class="card">
+            <div class="card-header">
+              <span class="card-title">⚡ Skills</span>
+              <button class="btn btn-sm btn-ghost" onclick="reloadSkills()">Reload</button>
+            </div>
+            <div id="d-skills" style="display:flex;flex-wrap:wrap;gap:6px"><span class="tag tag-blue">Carregando...</span></div>
+          </div>
+          <div class="card">
+            <div class="card-header"><span class="card-title">🔧 Ferramentas</span></div>
+            <div id="d-tools" style="display:flex;flex-wrap:wrap;gap:6px"><span class="tag tag-blue">Carregando...</span></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ── CONVERSATIONS PAGE ──────────────────────────── -->
+      <div class="page" id="page-conversations">
+        <div class="main-header">
+          <div><h1>Conversas</h1><div class="subtitle">Histórico de conversas do Telegram</div></div>
+          <button class="btn btn-sm btn-ghost" onclick="fetchConversations()">🔄 Atualizar</button>
+        </div>
+        <div class="grid grid-2">
+          <div class="card" style="max-height:600px;overflow:hidden;display:flex;flex-direction:column">
+            <div class="card-header"><span class="card-title">Conversas recentes</span></div>
+            <div class="conv-list" id="convList">
+              <div class="empty-state"><div class="icon">💬</div><h3>Nenhuma conversa ainda</h3></div>
+            </div>
+          </div>
+          <div class="card" style="max-height:600px;overflow:hidden;display:flex;flex-direction:column">
+            <div class="card-header"><span class="card-title" id="msgTitle">Selecione uma conversa</span></div>
+            <div class="msg-list" id="msgList">
+              <div class="empty-state"><div class="icon">👈</div><h3>Clique em uma conversa ao lado</h3></div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ── LOGS PAGE ───────────────────────────────────── -->
+      <div class="page" id="page-logs">
+        <div class="main-header">
+          <div><h1>Logs</h1><div class="subtitle">Atividade em tempo real do agente</div></div>
+        </div>
+        <div class="toolbar">
+          <button class="btn btn-sm btn-ghost" onclick="fetchLogs()">🔄 Atualizar</button>
+          <button class="btn btn-sm btn-ghost" onclick="filterLogs('')">Todos</button>
+          <button class="btn btn-sm btn-ghost" onclick="filterLogs('info')" style="color:var(--green)">Info</button>
+          <button class="btn btn-sm btn-ghost" onclick="filterLogs('warn')" style="color:var(--yellow)">Warn</button>
+          <button class="btn btn-sm btn-ghost" onclick="filterLogs('error')" style="color:var(--red)">Error</button>
+          <span class="spacer"></span>
+          <button class="btn btn-sm btn-danger" onclick="clearLogs()">🗑️ Limpar</button>
+        </div>
+        <div class="card" style="padding:0;overflow:hidden">
+          <div class="log-viewer" id="logViewer"></div>
+        </div>
+      </div>
+
+      <!-- ── SOUL PAGE ───────────────────────────────────── -->
+      <div class="page" id="page-soul">
+        <div class="main-header">
+          <div><h1>Soul — Personalidade</h1><div class="subtitle">Identidade e comportamento do agente</div></div>
+          <button class="btn btn-sm btn-ghost" onclick="fetchSoul()">🔄 Atualizar</button>
+        </div>
+        <div id="soulContent">
+          <div class="empty-state"><div class="icon">🧠</div><h3>Carregando...</h3></div>
+        </div>
+      </div>
+
+      <!-- ── MEMORY PAGE ─────────────────────────────────── -->
+      <div class="page" id="page-memory">
+        <div class="main-header">
+          <div><h1>Memória</h1><div class="subtitle">Armazenamento e memória semântica</div></div>
+        </div>
+        <div class="grid grid-3" id="memoryStats">
+          <div class="card stat-card">
+            <div class="stat-value" style="color:var(--blue)" id="m-main-size">—</div>
+            <div class="stat-label">Banco Principal</div>
+          </div>
+          <div class="card stat-card">
+            <div class="stat-value" style="color:var(--cyan)" id="m-semantic-size">—</div>
+            <div class="stat-label">Memória Semântica</div>
+          </div>
+          <div class="card stat-card">
+            <div class="stat-value" id="m-semantic-status">—</div>
+            <div class="stat-label">Status Embeddings</div>
+          </div>
+        </div>
+        <div class="tutorial-box" style="margin-top:20px">
+          <h3>💡 Como funciona a memória</h3>
+          <ul>
+            <li><strong>Curto prazo:</strong> Últimas N mensagens mantidas em SQLite (configurable via <code>MEMORY_WINDOW_SIZE</code>)</li>
+            <li><strong>Longo prazo:</strong> Fatos, preferências e instruções extraídos automaticamente e armazenados com embeddings locais (ONNX)</li>
+            <li><strong>Busca inteligente:</strong> Memórias só são buscadas quando o contexto precisa — economizando tokens</li>
+            <li><strong>Zero custo de API:</strong> Embeddings rodam localmente no CPU, sem chamar nenhuma API externa</li>
+          </ul>
+        </div>
+      </div>
+
+      <!-- ── SETTINGS PAGE ───────────────────────────────── -->
+      <div class="page" id="page-settings">
+        <div class="main-header">
+          <div><h1>Configuração</h1><div class="subtitle">Gerenciar agente e servidor</div></div>
+        </div>
+        <div class="grid grid-2">
+          <div class="card">
+            <div class="card-header"><span class="card-title">⚡ Ações rápidas</span></div>
+            <div style="display:flex;flex-direction:column;gap:10px">
+              <button class="btn btn-ghost" onclick="reloadSkills()">🔄 Recarregar Skills</button>
+              <button class="btn btn-ghost" onclick="reloadProviders()">🔄 Recarregar Providers</button>
+              <button class="btn btn-ghost" onclick="reloadIdentity()">🧠 Recarregar Soul</button>
+              <button class="btn btn-ghost" onclick="document.getElementById('changePwdModal').classList.add('active')">🔐 Trocar Senha</button>
+              <button class="btn btn-danger" onclick="if(confirm('Reiniciar o BollaClaw?'))restartBot()">⚠️ Reiniciar Bot</button>
+            </div>
+          </div>
+          <div class="card">
+            <div class="card-header"><span class="card-title">📋 Configuração Atual</span></div>
+            <div class="kv-row"><span class="kv-key">STT Provider</span><span class="kv-val" id="cfg-stt">—</span></div>
+            <div class="kv-row"><span class="kv-key">Max Iterações</span><span class="kv-val" id="cfg-iter">—</span></div>
+            <div class="kv-row"><span class="kv-key">Janela Memória</span><span class="kv-val" id="cfg-memwin">—</span></div>
+            <div class="kv-row"><span class="kv-key">Porta Admin</span><span class="kv-val" id="cfg-port">—</span></div>
+            <div class="kv-row"><span class="kv-key">Telegram IDs</span><span class="kv-val" id="cfg-tg" style="font-size:11px;max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">—</span></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ── ACCESS PAGE ─────────────────────────────────── -->
+      <div class="page" id="page-access">
+        <div class="main-header">
+          <div><h1>Acesso Remoto</h1><div class="subtitle">Como acessar o painel de qualquer lugar</div></div>
+        </div>
+
+        <div class="tutorial-box">
+          <h3>🖥️ Acesso local (mesma rede)</h3>
+          <p style="color:var(--text-2);margin:8px 0">Se você está na mesma rede do servidor, acesse diretamente:</p>
+          <pre>http://&lt;IP-DO-SERVIDOR&gt;:<span id="tut-port">21086</span></pre>
+        </div>
+
+        <div class="tutorial-box">
+          <h3>🌐 Acesso remoto (VPS)</h3>
+          <p style="color:var(--text-2);margin:8px 0">Para acessar seu painel em um servidor VPS de qualquer lugar, siga os passos:</p>
+          <ol>
+            <li>
+              <strong>Abra o terminal</strong> no seu computador (CMD, PowerShell ou Terminal)
+            </li>
+            <li>
+              <strong>Conecte via SSH com túnel:</strong>
+              <pre>ssh -L 21086:localhost:<span class="tut-port-remote">21086</span> usuario@seu-servidor-ip</pre>
+              <p style="color:var(--text-3);font-size:12px;margin-top:4px">
+                Isso cria um túnel seguro. A porta <code><span class="tut-port-remote">21086</span></code> do servidor
+                será acessível na sua máquina local.
+              </p>
+            </li>
+            <li>
+              <strong>Digite a senha</strong> do servidor quando solicitado
+            </li>
+            <li>
+              <strong>Abra o navegador</strong> e acesse:
+              <pre>http://localhost:<span class="tut-port-remote">21086</span></pre>
+            </li>
+            <li>
+              <strong>Use a senha do painel</strong> (gerada na instalação ou alterada por você)
+            </li>
+          </ol>
+        </div>
+
+        <div class="tutorial-box">
+          <h3>📱 Exemplo completo — Servidor BollaClaw</h3>
+          <pre># 1. Abra o PowerShell / Terminal
+# 2. Conecte com túnel SSH:
+ssh -L 21086:localhost:<span class="tut-port-remote">21086</span> ubuntu@server1.bolla.network
+
+# 3. Após conectar, abra no navegador:
+#    http://localhost:<span class="tut-port-remote">21086</span>
+
+# 4. Use a senha gerada na instalação para entrar</pre>
+        </div>
+
+        <div class="tutorial-box">
+          <h3>🔧 Comando rápido (CLI)</h3>
+          <p style="color:var(--text-2);margin:8px 0">Você também pode abrir o painel via terminal no servidor:</p>
+          <pre>bollaclaw web</pre>
+          <p style="color:var(--text-3);font-size:12px;margin-top:4px">
+            Mostra o endereço do painel e abre automaticamente se tiver navegador disponível.
+          </p>
+        </div>
+      </div>
+
+    </main>
+  </div>
+</div>
+
+<!-- ═══════════════════════════════════════════════════════════
+     JAVASCRIPT
+     ═══════════════════════════════════════════════════════════ -->
 <script>
 let token = localStorage.getItem('bc_token') || '';
-let autoScroll = true;
+let currentLogFilter = '';
+let pollingTimers = [];
+
+// ── Auth ──────────────────────────────────────────────────
 
 function login() {
   const pwd = document.getElementById('pwdInput').value;
-  fetch('/api/login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ password: pwd }) })
-    .then(r => r.json()).then(d => {
-      if (d.token) {
-        token = d.token;
-        localStorage.setItem('bc_token', token);
-        document.getElementById('loginScreen').style.display = 'none';
-        document.getElementById('app').style.display = 'block';
-        startPolling();
-      } else {
-        document.getElementById('loginError').textContent = 'Senha incorreta';
+  const errEl = document.getElementById('loginError');
+  errEl.textContent = '';
+
+  fetch('/api/login', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ password: pwd })
+  })
+  .then(r => r.json())
+  .then(d => {
+    if (d.token) {
+      token = d.token;
+      localStorage.setItem('bc_token', token);
+      showApp();
+      if (d.mustChangePassword) {
+        document.getElementById('changePwdModal').classList.add('active');
+        document.getElementById('currentPwd').value = pwd;
       }
-    });
+    } else {
+      errEl.textContent = d.error === 'Too many attempts. Wait 15 minutes.'
+        ? 'Muitas tentativas. Aguarde 15 minutos.'
+        : 'Senha incorreta';
+    }
+  })
+  .catch(() => { errEl.textContent = 'Erro de conexão'; });
 }
 
-function api(path) {
-  return fetch(path, { headers: { Authorization: 'Bearer ' + token } }).then(r => {
+function changePassword() {
+  const curr = document.getElementById('currentPwd').value;
+  const newP = document.getElementById('newPwd').value;
+  const conf = document.getElementById('confirmPwd').value;
+  const err = document.getElementById('changePwdError');
+  err.textContent = '';
+
+  if (newP !== conf) { err.textContent = 'As senhas não coincidem'; return; }
+  if (newP.length < 6) { err.textContent = 'Mínimo 6 caracteres'; return; }
+
+  api('/api/change-password', 'POST', { currentPassword: curr, newPassword: newP })
+  .then(d => {
+    if (d.ok) { closePwdModal(); alert('Senha alterada!'); }
+    else err.textContent = d.error || 'Erro';
+  });
+}
+
+function closePwdModal() {
+  document.getElementById('changePwdModal').classList.remove('active');
+}
+
+// ── API Helper ────────────────────────────────────────────
+
+function api(path, method = 'GET', body = null) {
+  const opts = { method, headers: { Authorization: 'Bearer ' + token } };
+  if (body) {
+    opts.headers['Content-Type'] = 'application/json';
+    opts.body = JSON.stringify(body);
+  }
+  return fetch(path, opts).then(r => {
     if (r.status === 401) { token = ''; localStorage.removeItem('bc_token'); location.reload(); }
     return r.json();
   });
 }
 
+// ── Show App ──────────────────────────────────────────────
+
+function showApp() {
+  document.getElementById('loginScreen').style.display = 'none';
+  document.getElementById('app').style.display = 'block';
+  startPolling();
+  fetchAll();
+}
+
+// ── Navigation ────────────────────────────────────────────
+
+function showPage(name) {
+  document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
+  document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
+
+  const page = document.getElementById('page-' + name);
+  const nav = document.querySelector(`[data-page="${name}"]`);
+  if (page) page.classList.add('active');
+  if (nav) nav.classList.add('active');
+
+  if (name === 'conversations') fetchConversations();
+  if (name === 'logs') fetchLogs();
+  if (name === 'soul') fetchSoul();
+  if (name === 'memory') fetchMemory();
+  if (name === 'settings') fetchStatus();
+
+  // Update port in tutorials
+  const port = document.getElementById('cfg-port')?.textContent || '21086';
+  document.getElementById('tut-port').textContent = port;
+  document.querySelectorAll('.tut-port-remote').forEach(el => el.textContent = port);
+}
+
+// ── Polling ───────────────────────────────────────────────
+
 function startPolling() {
+  pollingTimers.forEach(t => clearInterval(t));
+  pollingTimers = [
+    setInterval(fetchStatus, 5000),
+    setInterval(fetchLogs, 4000),
+  ];
+}
+
+function fetchAll() {
   fetchStatus();
   fetchLogs();
-  setInterval(fetchStatus, 5000);
-  setInterval(fetchLogs, 3000);
 }
+
+// ── Fetch Status ──────────────────────────────────────────
 
 function fetchStatus() {
   api('/api/status').then(d => {
-    document.getElementById('cpu').textContent = d.system?.cpu ?? '—';
-    document.getElementById('ram').textContent = d.system?.ram ?? '—';
-    document.getElementById('uptime').textContent = d.system?.uptime ?? '—';
-    document.getElementById('nodeVer').textContent = d.system?.node ?? '—';
-    document.getElementById('provider').textContent = d.agent?.provider ?? '—';
-    document.getElementById('sttProvider').textContent = d.config?.stt ?? '—';
-    document.getElementById('maxIter').textContent = d.config?.maxIter ?? '—';
-    document.getElementById('memWindow').textContent = d.config?.memWindow ?? '—';
+    const s = d.system || {};
+    const a = d.agent || {};
+    const g = d.git || {};
+    const p = d.pm2 || {};
+    const c = d.config || {};
 
-    const skillsList = document.getElementById('skillsList');
-    if (d.agent?.skills?.length) {
-      skillsList.innerHTML = d.agent.skills.map(s => `<span class="tag" title="${s.description}">${s.name}</span>`).join('');
+    // Stat cards
+    el('s-cpu', s.cpuUsage + '%');
+    el('s-ram', s.ramPercent + '%');
+    el('s-disk', s.diskPercent + '%');
+    el('s-uptime', s.uptimeFormatted);
+    el('s-process-uptime', 'Processo: ' + s.processUptime);
+
+    qs('#s-cpu-bar').style.width = s.cpuUsage + '%';
+    qs('#s-ram-bar').style.width = s.ramPercent + '%';
+    qs('#s-disk-bar').style.width = s.diskPercent + '%';
+
+    // Color coding for high usage
+    setBarColor('s-cpu-bar', s.cpuUsage);
+    setBarColor('s-ram-bar', s.ramPercent);
+    setBarColor('s-disk-bar', s.diskPercent);
+
+    // Agent
+    el('d-agent-name', a.agentName || 'BollaClaw');
+    el('d-agent-owner', a.owner || '—');
+    el('d-provider', a.defaultProvider || '—');
+    el('d-soul-status', a.soulConfigured ? '✅ Configurada' : '⏳ Pendente');
+    el('d-conv-count', a.conversationCount ?? '0');
+    el('d-agent-status', a.ready ? 'ONLINE' : 'OFFLINE');
+    qs('#d-agent-status').className = 'tag ' + (a.ready ? 'tag-green' : 'tag-red');
+
+    // System
+    el('d-hostname', s.hostname || '—');
+    el('d-node', s.nodeVersion || '—');
+    el('d-cpu-model', (s.cpuModel || '—').substring(0, 30));
+    el('d-cpu-cores', s.cpuCores || '—');
+    el('d-pid', s.pid || '—');
+
+    // Git
+    el('d-branch', g.branch || '—');
+    el('d-commit', g.commit || '—');
+    el('d-commit-msg', g.lastCommitMsg || '—');
+    el('d-pm2-status', p?.status || '—');
+    el('d-pm2-restarts', p?.restarts ?? '—');
+
+    // Config
+    el('cfg-stt', c.stt || '—');
+    el('cfg-iter', c.maxIter || '—');
+    el('cfg-memwin', c.memWindow || '—');
+    el('cfg-port', c.adminPort || '21086');
+    el('cfg-tg', (c.telegramAllowed || []).join(', ') || '—');
+
+    // Skills & Tools
+    const skillsEl = qs('#d-skills');
+    if (a.skills?.length) {
+      skillsEl.innerHTML = a.skills.map(s =>
+        `<span class="tag tag-blue" title="${esc(s.description || '')}">${esc(s.name)}</span>`
+      ).join('');
     } else {
-      skillsList.innerHTML = '<span style="color:var(--muted)">Nenhuma skill carregada</span>';
+      skillsEl.innerHTML = '<span style="color:var(--text-3)">Nenhuma skill</span>';
     }
 
-    const toolsList = document.getElementById('toolsList');
-    toolsList.innerHTML = (d.agent?.tools ?? []).map(t => `<span class="tag">${t}</span>`).join('');
+    const toolsEl = qs('#d-tools');
+    if (a.tools?.length) {
+      toolsEl.innerHTML = a.tools.map(t => `<span class="tag tag-green">${esc(t)}</span>`).join('');
+    } else {
+      toolsEl.innerHTML = '<span style="color:var(--text-3)">Nenhuma ferramenta</span>';
+    }
 
-    document.getElementById('lastUpdate').textContent = 'Atualizado: ' + new Date().toLocaleTimeString('pt-BR');
-  }).catch(() => {});
+    // Sidebar status
+    el('sidebarStatus', `${a.agentName || 'BollaClaw'} • Online`);
+    qs('#sidebarStatus').classList.remove('pulse');
+    qs('#sidebarStatus').style.color = 'var(--green)';
+
+    // Last refresh
+    el('lastRefresh', 'Atualizado: ' + new Date().toLocaleTimeString('pt-BR'));
+  }).catch(() => {
+    el('sidebarStatus', 'Desconectado');
+    qs('#sidebarStatus').style.color = 'var(--red)';
+  });
 }
+
+// ── Fetch Logs ────────────────────────────────────────────
 
 function fetchLogs() {
-  api('/api/logs').then(d => {
-    const box = document.getElementById('logBox');
-    box.innerHTML = (d.logs ?? []).map(l => {
-      const cls = 'log-' + (l.level || 'info');
+  const params = currentLogFilter ? `?level=${currentLogFilter}` : '';
+  api('/api/logs' + params).then(d => {
+    const box = qs('#logViewer');
+    if (!d.logs?.length) {
+      box.innerHTML = '<div style="color:var(--text-3);padding:20px;text-align:center">Nenhum log ainda</div>';
+      return;
+    }
+    box.innerHTML = d.logs.map(l => {
       const time = new Date(l.timestamp).toLocaleTimeString('pt-BR');
-      return `<div class="${cls}">[${time}] [${l.level?.toUpperCase()}] ${escHtml(l.message)}</div>`;
+      const lvl = (l.level || 'info').toUpperCase();
+      return `<div class="log-line"><span class="log-time">${time}</span> <span class="log-level-${l.level || 'info'}">[${lvl}]</span> ${esc(l.message)}</div>`;
     }).join('');
-    if (autoScroll) box.scrollTop = box.scrollHeight;
-  }).catch(() => {});
+    box.scrollTop = box.scrollHeight;
+  });
 }
 
-function reloadSkills() {
-  api('/api/reload-skills').then(() => { fetchStatus(); });
-}
+function filterLogs(level) { currentLogFilter = level; fetchLogs(); }
 
 function clearLogs() {
-  api('/api/clear-logs');
-  document.getElementById('logBox').innerHTML = '';
+  api('/api/logs', 'DELETE').then(() => {
+    qs('#logViewer').innerHTML = '';
+  });
 }
 
-function escHtml(s) {
-  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
-}
+// ── Fetch Conversations ───────────────────────────────────
 
-// Check existing token
-if (token) {
-  fetch('/api/status', { headers: { Authorization: 'Bearer ' + token } }).then(r => {
-    if (r.ok) {
-      document.getElementById('loginScreen').style.display = 'none';
-      document.getElementById('app').style.display = 'block';
-      startPolling();
+function fetchConversations() {
+  api('/api/conversations').then(d => {
+    const list = qs('#convList');
+    if (!d.conversations?.length) {
+      list.innerHTML = '<div class="empty-state"><div class="icon">💬</div><h3>Nenhuma conversa</h3></div>';
+      return;
     }
+    list.innerHTML = d.conversations.map(c => `
+      <div class="conv-item" onclick="loadMessages('${c.id}', '${esc(c.user_id)}')">
+        <div>
+          <div class="conv-user">User ${esc(c.user_id)}</div>
+          <div class="conv-meta">${esc(c.provider)} • ${new Date(c.updated_at).toLocaleString('pt-BR')}</div>
+        </div>
+        <span class="conv-badge">${c.message_count}</span>
+      </div>
+    `).join('');
+  });
+}
+
+function loadMessages(convId, userId) {
+  el('msgTitle', 'User ' + userId);
+  api(`/api/conversations/${convId}/messages`).then(d => {
+    const list = qs('#msgList');
+    if (!d.messages?.length) {
+      list.innerHTML = '<div class="empty-state"><h3>Conversa vazia</h3></div>';
+      return;
+    }
+    list.innerHTML = d.messages.map(m => {
+      const cls = m.role === 'user' ? 'msg-user' : 'msg-assistant';
+      const time = new Date(m.created_at).toLocaleTimeString('pt-BR');
+      const content = esc(m.content).substring(0, 500);
+      return `<div class="msg-bubble ${cls}">${content}<div class="msg-time">${m.role} • ${time}</div></div>`;
+    }).join('');
+    list.scrollTop = list.scrollHeight;
+  });
+}
+
+// ── Fetch Soul ────────────────────────────────────────────
+
+function fetchSoul() {
+  api('/api/soul').then(d => {
+    const box = qs('#soulContent');
+    if (!d.configured || !d.soul) {
+      box.innerHTML = `
+        <div class="tutorial-box">
+          <h3>🧠 Soul não configurada</h3>
+          <p style="color:var(--text-2);margin:8px 0">A personalidade do agente será configurada automaticamente na primeira mensagem do Telegram.</p>
+          <p style="color:var(--text-2)">O bootstrap faz perguntas ao usuário para definir: nome, personalidade, tom, idioma e regras.</p>
+        </div>`;
+      return;
+    }
+
+    const s = d.soul;
+    const traits = s.traits || {};
+    let html = '<div class="grid grid-2" style="margin-bottom:20px">';
+
+    // Identity card
+    html += `<div class="card">
+      <div class="card-header"><span class="card-title">🪪 Identidade</span></div>
+      <div class="kv-row"><span class="kv-key">Nome</span><span class="kv-val">${esc(s.name)}</span></div>
+      <div class="kv-row"><span class="kv-key">Papel</span><span class="kv-val">${esc(s.role)}</span></div>
+      <div class="kv-row"><span class="kv-key">Criador</span><span class="kv-val">${esc(s.creator)}</span></div>
+      <div class="kv-row"><span class="kv-key">Dono</span><span class="kv-val">${esc(s.owner?.name || '—')}</span></div>
+      <div class="kv-row"><span class="kv-key">Idioma</span><span class="kv-val">${esc(s.owner?.language || '—')}</span></div>
+      <div class="kv-row"><span class="kv-key">Tom</span><span class="kv-val">${esc(s.style?.tone || '—')}</span></div>
+      <div class="kv-row"><span class="kv-key">Conversas</span><span class="kv-val">${s.adaptiveData?.conversationCount || 0}</span></div>
+    </div>`;
+
+    // Traits card
+    html += `<div class="card">
+      <div class="card-header"><span class="card-title">📊 Traços de Personalidade</span></div>`;
+    for (const [name, val] of Object.entries(traits)) {
+      html += `<div class="trait-row">
+        <span class="trait-name">${esc(name)}</span>
+        <div class="trait-bar"><div class="trait-fill" style="width:${val}%"></div></div>
+        <span class="trait-val">${val}</span>
+      </div>`;
+    }
+    html += '</div></div>';
+
+    // Values, rules, etc
+    html += '<div class="grid grid-2">';
+    if (s.values?.length) {
+      html += `<div class="card"><div class="card-header"><span class="card-title">💎 Valores</span></div>`;
+      html += s.values.map(v => `<div style="padding:4px 0;color:var(--text-2);font-size:13px">• ${esc(v)}</div>`).join('');
+      html += '</div>';
+    }
+    if (s.rules?.length) {
+      html += `<div class="card"><div class="card-header"><span class="card-title">📋 Regras</span></div>`;
+      html += s.rules.map(r => `<div style="padding:4px 0;color:var(--text-2);font-size:13px">• ${esc(r)}</div>`).join('');
+      html += '</div>';
+    }
+    html += '</div>';
+
+    box.innerHTML = html;
+  });
+}
+
+// ── Fetch Memory ──────────────────────────────────────────
+
+function fetchMemory() {
+  api('/api/memory').then(d => {
+    el('m-main-size', d.mainDbSize || '0');
+    el('m-semantic-size', d.semanticDbSize || '0');
+    const status = d.semanticEnabled ? '✅ Ativo' : '⏳ Inativo';
+    el('m-semantic-status', status);
+    qs('#m-semantic-status').style.color = d.semanticEnabled ? 'var(--green)' : 'var(--yellow)';
+  });
+}
+
+// ── Actions ───────────────────────────────────────────────
+
+function reloadSkills() { api('/api/reload-skills', 'POST').then(() => fetchStatus()); }
+function reloadProviders() { api('/api/reload-providers', 'POST').then(() => fetchStatus()); }
+function reloadIdentity() { api('/api/reload-identity', 'POST').then(() => fetchStatus()); }
+function restartBot() { api('/api/restart', 'POST'); }
+
+// ── Helpers ───────────────────────────────────────────────
+
+function el(id, text) { const e = document.getElementById(id); if (e) e.textContent = text; }
+function qs(sel) { return document.querySelector(sel); }
+function esc(s) { return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+
+function setBarColor(id, pct) {
+  const bar = qs('#' + id);
+  if (!bar) return;
+  if (pct > 85) bar.style.background = 'var(--red)';
+  else if (pct > 60) bar.style.background = 'var(--yellow)';
+}
+
+// ── Init ──────────────────────────────────────────────────
+
+if (token) {
+  fetch('/api/health').then(r => r.json()).then(() => {
+    fetch('/api/status', { headers: { Authorization: 'Bearer ' + token } }).then(r => {
+      if (r.ok) showApp();
+    });
   });
 }
 </script>

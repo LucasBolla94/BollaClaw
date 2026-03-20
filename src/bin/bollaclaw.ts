@@ -5,6 +5,7 @@
 
 import * as dotenv from 'dotenv';
 import * as path from 'path';
+import * as fs from 'fs';
 import * as readline from 'readline';
 
 // Load .env from the bollaclaw directory
@@ -66,6 +67,8 @@ function main() {
       return cmdUpdate(args.slice(1));
     case 'soul':
       return cmdSoul(args.slice(1));
+    case 'web':
+      return cmdWeb();
     default:
       console.log(`\n  ${R}✘${NC} Comando desconhecido: ${BOLD}${command}${NC}`);
       console.log(`  Use ${C}bollaclaw help${NC} para ver os comandos.\n`);
@@ -505,6 +508,58 @@ function cmdSoul(args: string[]) {
   }
 }
 
+// ── Web Panel ───────────────────────────────────────────────
+
+function cmdWeb() {
+  const envPath = path.join(projectRoot, '.env');
+  let port = '21086';
+
+  if (fs.existsSync(envPath)) {
+    const envContent = fs.readFileSync(envPath, 'utf-8');
+    const match = envContent.match(/ADMIN_PORT=(\d+)/);
+    if (match) port = match[1];
+  }
+
+  const hostname = (() => {
+    try { return execSync('hostname -I', { encoding: 'utf-8' }).trim().split(' ')[0]; }
+    catch { return 'localhost'; }
+  })();
+
+  const serverHostname = (() => {
+    try { return execSync('hostname', { encoding: 'utf-8' }).trim(); }
+    catch { return 'servidor'; }
+  })();
+
+  console.log(`
+  ${W}🌐 BollaClaw Web Panel${NC}
+
+  ${BOLD}Acesso local:${NC}
+    ${C}http://localhost:${port}${NC}
+    ${C}http://${hostname}:${port}${NC}
+
+  ${BOLD}Acesso remoto (SSH tunnel):${NC}
+    ${DIM}No seu computador, execute:${NC}
+
+    ${G}ssh -L ${port}:localhost:${port} ubuntu@${serverHostname}${NC}
+
+    ${DIM}Depois abra no navegador:${NC}
+    ${C}http://localhost:${port}${NC}
+
+  ${BOLD}Senha:${NC}
+    ${DIM}Definida na instalação (ADMIN_PASSWORD no .env)${NC}
+    ${DIM}Recomendado trocar no primeiro acesso.${NC}
+`);
+
+  // Try to check if panel is running
+  try {
+    execSync(`curl -s --connect-timeout 2 http://localhost:${port}/api/health`, { encoding: 'utf-8' });
+    console.log(`  ${G}●${NC} Painel ${G}online${NC} e funcionando\n`);
+  } catch {
+    console.log(`  ${Y}●${NC} Painel ${Y}não detectado${NC} — verifique se o bot está rodando\n`);
+    console.log(`  ${DIM}Inicie com: ${C}bollaclaw start${NC}\n`);
+  }
+}
+
 // ── Help ─────────────────────────────────────────────────────
 
 function showHelp() {
@@ -540,7 +595,8 @@ function showHelp() {
   ${DIM}├─${NC} ${C}bollaclaw start${NC}           Iniciar bot
   ${DIM}├─${NC} ${C}bollaclaw stop${NC}            Parar bot
   ${DIM}├─${NC} ${C}bollaclaw logs${NC}            Ver logs (últimas 50 linhas)
-  ${DIM}└─${NC} ${C}bollaclaw update${NC}          Checar e aplicar atualização
+  ${DIM}├─${NC} ${C}bollaclaw update${NC}          Checar e aplicar atualização
+  ${DIM}└─${NC} ${C}bollaclaw web${NC}             Painel web (admin dashboard)
 
   ${W}EXEMPLOS${NC}
   ${DIM}$${NC} bollaclaw add A3X9K2                ${DIM}# Aprovar novo usuário${NC}
@@ -548,6 +604,7 @@ function showHelp() {
   ${DIM}$${NC} bollaclaw models set gpt-4o          ${DIM}# Trocar para GPT-4o${NC}
   ${DIM}$${NC} bollaclaw soul                       ${DIM}# Ver personalidade${NC}
   ${DIM}$${NC} bollaclaw update                     ${DIM}# Atualizar do GitHub${NC}
+  ${DIM}$${NC} bollaclaw web                        ${DIM}# Abrir painel admin${NC}
 `);
 }
 
