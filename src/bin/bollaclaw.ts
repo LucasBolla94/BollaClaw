@@ -7,6 +7,7 @@ import * as dotenv from 'dotenv';
 import * as path from 'path';
 import * as fs from 'fs';
 import * as readline from 'readline';
+import * as crypto from 'crypto';
 
 // Load .env from the bollaclaw directory
 const projectRoot = path.resolve(__dirname, '..');
@@ -69,6 +70,8 @@ function main() {
       return cmdSoul(args.slice(1));
     case 'web':
       return cmdWeb();
+    case 'change':
+      return cmdChangePassword(args.slice(1));
     default:
       console.log(`\n  ${R}✘${NC} Comando desconhecido: ${BOLD}${command}${NC}`);
       console.log(`  Use ${C}bollaclaw help${NC} para ver os comandos.\n`);
@@ -569,6 +572,101 @@ function cmdWeb() {
   }
 }
 
+// ── Change Password ──────────────────────────────────────────
+
+function cmdChangePassword(args: string[]) {
+  if (args[0]?.toLowerCase() !== 'password') {
+    console.log(`\n  ${R}✘${NC} Uso: ${C}bollaclaw change password${NC}`);
+    console.log(`  ${DIM}Altera a senha do painel web.${NC}\n`);
+    process.exit(1);
+  }
+
+  const credPath = path.join(projectRoot, 'data', 'web-credentials.json');
+  if (!fs.existsSync(credPath)) {
+    console.log(`\n  ${R}✘${NC} Credenciais não encontradas. O painel já foi iniciado ao menos uma vez?\n`);
+    process.exit(1);
+  }
+
+  const creds = JSON.parse(fs.readFileSync(credPath, 'utf-8'));
+
+  const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
+  const ask = (q: string, hidden = false): Promise<string> =>
+    new Promise(resolve => {
+      if (hidden) {
+        process.stdout.write(q);
+        let input = '';
+        const stdin = process.stdin;
+        stdin.setRawMode(true);
+        stdin.resume();
+        stdin.setEncoding('utf-8');
+        const handler = (ch: string) => {
+          if (ch === '\r' || ch === '\n') {
+            stdin.setRawMode(false);
+            stdin.pause();
+            stdin.removeListener('data', handler);
+            process.stdout.write('\n');
+            resolve(input);
+          } else if (ch === '\u0003') {
+            process.exit();
+          } else if (ch === '\u007f') {
+            if (input.length > 0) input = input.slice(0, -1);
+          } else {
+            input += ch;
+          }
+        };
+        stdin.on('data', handler);
+      } else {
+        rl.question(q, answer => resolve(answer));
+      }
+    });
+
+  (async () => {
+    try {
+      console.log(`\n  ${W}Alterar senha do painel web${NC}\n`);
+
+      const current = await ask(`  Senha atual: `, true);
+      const hashCurrent = crypto.pbkdf2Sync(current, creds.salt, 100000, 64, 'sha512').toString('hex');
+      if (!crypto.timingSafeEqual(Buffer.from(hashCurrent, 'hex'), Buffer.from(creds.hash, 'hex'))) {
+        console.log(`\n  ${R}✘${NC} Senha atual incorreta.\n`);
+        rl.close();
+        process.exit(1);
+      }
+
+      const newPwd = await ask(`  Nova senha (mín. 8 caracteres): `, true);
+      if (newPwd.length < 8) {
+        console.log(`\n  ${R}✘${NC} A nova senha deve ter pelo menos 8 caracteres.\n`);
+        rl.close();
+        process.exit(1);
+      }
+
+      const newSalt = crypto.randomBytes(32).toString('hex');
+      const newHash = crypto.pbkdf2Sync(newPwd, newSalt, 100000, 64, 'sha512').toString('hex');
+
+      const history: string[] = creds.passwordHistory || [];
+      if (history.some((h: string) => {
+        try { return crypto.timingSafeEqual(Buffer.from(h, 'hex'), Buffer.from(crypto.pbkdf2Sync(newPwd, creds.salt, 100000, 64, 'sha512').toString('hex'), 'hex')); }
+        catch { return false; }
+      })) {
+        console.log(`\n  ${R}✘${NC} Não é possível reutilizar uma senha recente.\n`);
+        rl.close();
+        process.exit(1);
+      }
+
+      creds.passwordHistory = [creds.hash, ...history].slice(0, 3);
+      creds.hash = newHash;
+      creds.salt = newSalt;
+      creds.mustChangePassword = false;
+      fs.writeFileSync(credPath, JSON.stringify(creds, null, 2), { mode: 0o600 });
+
+      console.log(`\n  ${G}✔${NC} Senha alterada com sucesso!\n`);
+      console.log(`  ${DIM}Todas as sessões ativas foram invalidadas.${NC}\n`);
+      console.log(`  ${DIM}Reinicie o bot para aplicar: ${C}bollaclaw restart${NC}\n`);
+    } finally {
+      rl.close();
+    }
+  })();
+}
+
 // ── Help ─────────────────────────────────────────────────────
 
 function showHelp() {
@@ -605,7 +703,8 @@ function showHelp() {
   ${DIM}├─${NC} ${C}bollaclaw stop${NC}            Parar bot
   ${DIM}├─${NC} ${C}bollaclaw logs${NC}            Ver logs (últimas 50 linhas)
   ${DIM}├─${NC} ${C}bollaclaw update${NC}          Checar e aplicar atualização
-  ${DIM}└─${NC} ${C}bollaclaw web${NC}             Painel web (admin dashboard)
+  ${DIM}├─${NC} ${C}bollaclaw web${NC}             Painel web (admin dashboard)
+  ${DIM}└─${NC} ${C}bollaclaw change password${NC} Altera a senha do painel web
 
   ${W}EXEMPLOS${NC}
   ${DIM}$${NC} bollaclaw add A3X9K2                ${DIM}# Aprovar novo usuário${NC}
