@@ -53,10 +53,11 @@ export function parseToolCallsFromText(
     return { calls, cleanedContent };
   }
 
-  // ── Parser 2: Inline JSON objects ──
-  // Matches: { "name": "tool_name", "parameters": {...} }
-  const inlineJsonRegex = /\{\s*"name"\s*:\s*"([^"]+)"\s*,\s*"parameters"\s*:\s*(\{[\s\S]*?\})\s*\}/gi;
-  while ((match = inlineJsonRegex.exec(content)) !== null) {
+  // ── Parser 2: Generic JSON object with "name" + "parameters"/"arguments" ──
+  // Matches any JSON object containing a tool name and params, regardless of field order
+  // Handles: {"name":"x","parameters":{...}}, {"type":"function","name":"x","parameters":{...}}, etc.
+  const jsonObjectRegex = /\{[^{}]*"name"\s*:\s*"([^"]+)"[^{}]*"(?:parameters|arguments)"\s*:\s*(\{[\s\S]*?\})[^{}]*\}/gi;
+  while ((match = jsonObjectRegex.exec(content)) !== null) {
     const toolName = match[1];
     if (toolSet.has(toolName.toLowerCase())) {
       try {
@@ -67,26 +68,37 @@ export function parseToolCallsFromText(
     }
   }
 
-  if (calls.length > 0) {
-    logger.info(`[ToolCallParser] Extracted ${calls.length} tool call(s) from inline JSON`);
-    return { calls, cleanedContent };
+  // Also try reverse field order: {"parameters":{...}, "name":"x"}
+  if (calls.length === 0) {
+    const reverseRegex = /\{[^{}]*"(?:parameters|arguments)"\s*:\s*(\{[\s\S]*?\})[^{}]*"name"\s*:\s*"([^"]+)"[^{}]*\}/gi;
+    while ((match = reverseRegex.exec(content)) !== null) {
+      const toolName = match[2];
+      if (toolSet.has(toolName.toLowerCase())) {
+        try {
+          const args = JSON.parse(match[1]);
+          calls.push({ name: toolName, arguments: args });
+          cleanedContent = cleanedContent.replace(match[0], '').trim();
+        } catch { /* skip */ }
+      }
+    }
   }
 
-  // ── Parser 3: Alternative JSON format (arguments instead of parameters) ──
-  const altJsonRegex = /\{\s*"name"\s*:\s*"([^"]+)"\s*,\s*"arguments"\s*:\s*(\{[\s\S]*?\})\s*\}/gi;
-  while ((match = altJsonRegex.exec(content)) !== null) {
-    const toolName = match[1];
-    if (toolSet.has(toolName.toLowerCase())) {
-      try {
-        const args = JSON.parse(match[2]);
-        calls.push({ name: toolName, arguments: args });
-        cleanedContent = cleanedContent.replace(match[0], '').trim();
-      } catch { /* skip */ }
+  // Last resort: try parsing any JSON object in the text as a tool call
+  if (calls.length === 0) {
+    const anyJsonRegex = /\{[\s\S]*?\}/g;
+    while ((match = anyJsonRegex.exec(content)) !== null) {
+      if (match[0].length > 20 && match[0].length < 5000) {
+        const parsed = tryParseToolJson(match[0], toolSet);
+        if (parsed) {
+          calls.push(parsed);
+          cleanedContent = cleanedContent.replace(match[0], '').trim();
+        }
+      }
     }
   }
 
   if (calls.length > 0) {
-    logger.info(`[ToolCallParser] Extracted ${calls.length} tool call(s) from alt JSON format`);
+    logger.info(`[ToolCallParser] Extracted ${calls.length} tool call(s) from inline JSON`);
     return { calls, cleanedContent };
   }
 

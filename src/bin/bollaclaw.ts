@@ -10,9 +10,36 @@ import * as readline from 'readline';
 import * as crypto from 'crypto';
 
 // Load .env from the bollaclaw directory
-// __dirname is dist/bin/ when compiled, so we go up 2 levels to reach project root
-// In dev (ts-node), __dirname is src/bin/, also 2 levels up
-const projectRoot = path.resolve(__dirname, '..', '..');
+// Detect project root: try __dirname (works for compiled dist/bin/bollaclaw.js),
+// then check if we're symlinked (npm link) by looking for package.json
+function findProjectRoot(): string {
+  // Method 1: __dirname relative (dist/bin/ → project root)
+  const fromDirname = path.resolve(__dirname, '..', '..');
+  if (fs.existsSync(path.join(fromDirname, 'package.json'))) {
+    return fromDirname;
+  }
+
+  // Method 2: Follow the real path of this script (handles npm link symlinks)
+  try {
+    const realScript = fs.realpathSync(__filename);
+    const fromReal = path.resolve(path.dirname(realScript), '..', '..');
+    if (fs.existsSync(path.join(fromReal, 'package.json'))) {
+      return fromReal;
+    }
+  } catch { /* ignore */ }
+
+  // Method 3: Well-known install locations
+  for (const loc of ['/opt/bollaclaw', path.join(require('os').homedir(), 'bollaclaw')]) {
+    if (fs.existsSync(path.join(loc, 'package.json'))) {
+      return loc;
+    }
+  }
+
+  // Fallback: __dirname relative
+  return fromDirname;
+}
+
+const projectRoot = findProjectRoot();
 dotenv.config({ path: path.join(projectRoot, '.env') });
 
 import { UserManager } from '../auth/UserManager';
