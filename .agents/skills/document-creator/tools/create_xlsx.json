@@ -1,0 +1,41 @@
+{
+  "name": "create_xlsx",
+  "description": "Creates a formatted Excel (.xlsx) spreadsheet with headers, data rows, auto-width columns, and optional formulas. Returns the file path. You MUST include [FILE:path] in your answer after using this tool.",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "filename": {
+        "type": "string",
+        "description": "Output filename (without path), e.g. 'dados.xlsx'. Will be saved in ./output/"
+      },
+      "sheet_name": {
+        "type": "string",
+        "description": "Worksheet name (default: 'Dados')"
+      },
+      "headers": {
+        "type": "array",
+        "items": { "type": "string" },
+        "description": "Column headers, e.g. ['Nome', 'Idade', 'Email']"
+      },
+      "rows": {
+        "type": "array",
+        "items": {
+          "type": "array",
+          "items": {}
+        },
+        "description": "Data rows as array of arrays, e.g. [['João', 25, 'joao@email.com'], ['Maria', 30, 'maria@email.com']]"
+      },
+      "title": {
+        "type": "string",
+        "description": "Optional title row above headers"
+      },
+      "auto_filter": {
+        "type": "boolean",
+        "description": "Add auto-filter to headers (default: true)"
+      }
+    },
+    "required": ["filename", "headers", "rows"]
+  },
+  "script": "scripts/main.py",
+  "runtime": "python"
+}

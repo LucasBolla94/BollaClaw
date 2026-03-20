@@ -1,0 +1,36 @@
+{
+  "name": "create_pdf",
+  "description": "Creates a professional PDF document with title, content sections, headers and footers. Returns the file path. You MUST include [FILE:path] in your answer after using this tool.",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "filename": {
+        "type": "string",
+        "description": "Output filename (without path), e.g. 'relatorio.pdf'. Will be saved in ./output/"
+      },
+      "title": {
+        "type": "string",
+        "description": "Document title displayed at the top"
+      },
+      "content": {
+        "type": "string",
+        "description": "Main document content. Use \\n for line breaks, ## for section headers, - for bullet points, | for table columns (one row per line, first row = headers)"
+      },
+      "author": {
+        "type": "string",
+        "description": "Author name shown in header (optional)"
+      },
+      "font_size": {
+        "type": "number",
+        "description": "Base font size in points (default: 11)"
+      },
+      "language": {
+        "type": "string",
+        "description": "Document language for date formatting: 'pt' (default) or 'en'"
+      }
+    },
+    "required": ["filename", "title", "content"]
+  },
+  "script": "scripts/main.py",
+  "runtime": "python"
+}

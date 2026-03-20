@@ -308,6 +308,7 @@ fi
 if command -v python3 &>/dev/null; then
   run_step "edge-tts (text-to-speech)" bash -c 'pip3 install edge-tts --break-system-packages -q 2>/dev/null || pip3 install edge-tts -q 2>/dev/null || true'
   run_step "fastembed (local embeddings ONNX)" bash -c 'pip3 install fastembed --break-system-packages -q 2>/dev/null || pip3 install fastembed -q 2>/dev/null || true'
+  run_step "reportlab + python-docx + openpyxl (documents)" bash -c 'pip3 install reportlab python-docx openpyxl --break-system-packages -q 2>/dev/null || pip3 install reportlab python-docx openpyxl -q 2>/dev/null || true'
   kv "Python" "${G}$(python3 --version 2>&1 | awk '{print $2}')${NC}"
 else
   warn "Python3 não encontrado — TTS e embeddings desabilitados"

@@ -5,27 +5,12 @@ import { logger } from '../utils/logger';
 import * as path from 'path';
 
 /**
- * ScriptTool — dynamically wraps a skill's script as a callable tool.
+ * ScriptTool v2 — dynamically wraps a skill's script as a callable tool.
  *
- * When a skill defines tools/ JSON files, each one becomes a ScriptTool
- * that the LLM can invoke during the ReAct loop. The tool executes the
- * referenced script with the LLM-provided arguments and returns the output.
- *
- * Example tool definition (tools/search.json):
- * {
- *   "name": "weather_search",
- *   "description": "Search current weather for a city",
- *   "parameters": {
- *     "type": "object",
- *     "properties": {
- *       "city": { "type": "string", "description": "City name" },
- *       "units": { "type": "string", "enum": ["metric", "imperial"], "default": "metric" }
- *     },
- *     "required": ["city"]
- *   },
- *   "script": "scripts/weather.py",
- *   "runtime": "python"
- * }
+ * Improvements:
+ *   - If the script returns JSON with "message" field, that's used as output
+ *   - [FILE:path] tags in output are preserved for TelegramOutputHandler
+ *   - Better error extraction from JSON responses
  */
 export class ScriptTool extends BaseTool {
   readonly name: string;
@@ -63,7 +48,7 @@ export class ScriptTool extends BaseTool {
       this.skillDir,
       {
         args: enrichedArgs,
-        timeout: 30_000,
+        timeout: 60_000, // 60s for document generation
       }
     );
 
@@ -75,8 +60,38 @@ export class ScriptTool extends BaseTool {
       };
     }
 
-    // Combine stdout (primary output) with any stderr warnings
+    // Parse output
     let output = result.stdout.trim();
+
+    // Try to parse JSON response from script
+    try {
+      const parsed = JSON.parse(output);
+
+      if (parsed.error) {
+        logger.warn(`[ScriptTool:${this.name}] Script returned error: ${parsed.error}`);
+        return { output: '', error: parsed.error };
+      }
+
+      // If script returns a "message" field, use it as the primary output
+      // This is important for [FILE:path] propagation
+      if (parsed.message) {
+        output = parsed.message;
+
+        // Append extra context if available
+        const extras: string[] = [];
+        if (parsed.filepath) extras.push(`Path: ${parsed.filepath}`);
+        if (parsed.size_bytes) extras.push(`Size: ${parsed.size_bytes} bytes`);
+        if (parsed.rows !== undefined) extras.push(`Rows: ${parsed.rows}`);
+        if (parsed.columns !== undefined) extras.push(`Columns: ${parsed.columns}`);
+
+        if (extras.length > 0) {
+          output += '\n' + extras.join(' | ');
+        }
+      }
+    } catch {
+      // Not JSON — use raw stdout as output (normal for non-JSON scripts)
+    }
+
     if (result.stderr.trim()) {
       output += `\n[stderr]: ${result.stderr.trim()}`;
     }

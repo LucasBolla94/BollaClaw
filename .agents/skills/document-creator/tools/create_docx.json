@@ -1,0 +1,36 @@
+{
+  "name": "create_docx",
+  "description": "Creates a professional Word (.docx) document with title, headings, paragraphs, bullet lists and tables. Returns the file path. You MUST include [FILE:path] in your answer after using this tool.",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "filename": {
+        "type": "string",
+        "description": "Output filename (without path), e.g. 'documento.docx'. Will be saved in ./output/"
+      },
+      "title": {
+        "type": "string",
+        "description": "Document title"
+      },
+      "content": {
+        "type": "string",
+        "description": "Document content. Use \\n for line breaks, ## for section headers (Heading 2), ### for subsections (Heading 3), - for bullet points, | for table columns (first row = headers, one row per line)"
+      },
+      "author": {
+        "type": "string",
+        "description": "Author name in document properties (optional)"
+      },
+      "font_name": {
+        "type": "string",
+        "description": "Font family (default: 'Calibri')"
+      },
+      "font_size": {
+        "type": "number",
+        "description": "Base font size in points (default: 11)"
+      }
+    },
+    "required": ["filename", "title", "content"]
+  },
+  "script": "scripts/main.py",
+  "runtime": "python"
+}
