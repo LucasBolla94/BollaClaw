@@ -5,6 +5,7 @@ import { MemoryManager } from '../memory/MemoryManager';
 import { SkillLoader, Skill } from '../skills/SkillLoader';
 import { SkillRouter } from '../skills/SkillRouter';
 import { SkillExecutor } from '../skills/SkillExecutor';
+import { SkillInstaller } from '../skills/SkillInstaller';
 import { AgentLoop, AgentResult } from './AgentLoop';
 import { OnboardManager, IdentityConfig } from '../onboard/OnboardManager';
 import { SoulEngine } from '../soul/SoulEngine';
@@ -18,6 +19,7 @@ export class AgentController {
   private memoryManager: MemoryManager;
   private skillLoader: SkillLoader;
   private skillExecutor: SkillExecutor;
+  private skillInstaller: SkillInstaller;
   private onboardManager: OnboardManager;
   private soulEngine: SoulEngine;
   private soulBootstrap: SoulBootstrap;
@@ -30,6 +32,7 @@ export class AgentController {
     this.memoryManager = new MemoryManager();
     this.skillLoader = new SkillLoader();
     this.skillExecutor = new SkillExecutor();
+    this.skillInstaller = new SkillInstaller();
     this.onboardManager = new OnboardManager();
 
     // Soul system — data dir is ./data relative to cwd
@@ -85,6 +88,7 @@ export class AgentController {
     this.skills = this.skillLoader.loadAll();
 
     for (const skill of this.skills) {
+      // Register tool definitions as callable ScriptTools
       if (skill.tools.length > 0) {
         for (const toolDef of skill.tools) {
           const scriptTool = new ScriptTool(toolDef, skill.dirPath);
@@ -93,11 +97,17 @@ export class AgentController {
         }
       }
 
-      if (skill.dependencies) {
+      // Install dependencies if not already installed
+      if (skill.dependencies && !this.skillInstaller.isInstalled(skill.dirPath)) {
         const depsCheck = await this.skillExecutor.checkDependencies(skill);
         if (!depsCheck.ok) {
-          logger.warn(`Skill ${skill.name} has missing dependencies: ${depsCheck.missing.join(', ')}`);
-          await this.skillLoader.installDependencies(skill);
+          logger.info(`Installing dependencies for skill: ${skill.name}`);
+          const installResult = await this.skillInstaller.install(skill);
+          if (!installResult.success) {
+            logger.warn(`Skill ${skill.name} dependency install partial: ${installResult.failed.join(', ')}`);
+          } else {
+            logger.info(`Skill ${skill.name} dependencies installed: ${installResult.installed.join(', ')}`);
+          }
         }
       }
     }
@@ -263,7 +273,7 @@ Data/hora atual: ${now}`;
   }
 
   reloadSkills(): void {
-    const builtinTools = ['create_file', 'read_file', 'get_datetime'];
+    const builtinTools = ['create_file', 'read_file', 'get_datetime', 'create_skill', 'list_skills', 'delete_skill', 'validate_skill'];
     const currentTools = this.toolRegistry.listNames();
     for (const toolName of currentTools) {
       if (!builtinTools.includes(toolName)) {

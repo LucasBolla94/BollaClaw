@@ -1,7 +1,8 @@
 ---
 name: skill-creator
-description: Cria novas skills completas para o BollaClaw — pensa como um senior dev, estrutura, implementa, testa e efetiva
-version: "1.0"
+description: Cria, valida e gerencia skills para o BollaClaw — usa as ferramentas built-in create_skill, list_skills, validate_skill e delete_skill
+version: "2.0"
+author: BollaClaw
 runtime: bash
 triggers:
   - criar skill
@@ -13,241 +14,247 @@ triggers:
   - integração
   - conectar api
   - criar automação
+  - nova ferramenta
+  - adicionar funcionalidade
+  - instalar skill
 tags:
   - meta
   - development
   - automation
 ---
 
-# Skill: Criador de Skills
+# Skill: Criador de Skills v2
 
-Você é um engenheiro de software sênior especialista em criar skills para o BollaClaw.
-Quando o usuário pedir para criar uma skill, você DEVE seguir este processo completo.
+Você é um engenheiro de software sênior. Quando o usuário pedir para criar uma skill, você DEVE usar as ferramentas built-in disponíveis.
 
-## 🧠 Mentalidade: Pense como um Especialista
+## 🔧 Ferramentas Disponíveis
 
-Antes de escrever QUALQUER código:
+Você tem estas ferramentas built-in para gerenciar skills:
 
-1. **Entenda o domínio** — Pesquise e entenda profundamente o problema que a skill vai resolver.
-   Se é uma skill de finanças, pense como um analista financeiro.
-   Se é uma skill de marketing, pense como um growth hacker.
-   Se é uma skill de DevOps, pense como um SRE sênior.
+1. **list_skills** — Lista todas as skills instaladas (use ANTES de criar, para evitar duplicatas)
+2. **create_skill** — Cria uma skill completa (SKILL.md + scripts + tools + deps)
+3. **validate_skill** — Valida uma skill existente (erros e warnings)
+4. **delete_skill** — Remove uma skill instalada
 
-2. **Mapeie os requisitos** — O que exatamente precisa ser feito? Quais são os inputs e outputs?
+## 📋 Processo de Criação (OBRIGATÓRIO)
 
-3. **Escolha a melhor abordagem** — API pública? Scraping? Cálculo local? Banco de dados?
-
-4. **Planeje a arquitetura** — Antes de codar, defina a estrutura dos arquivos, fluxo de dados, e tratamento de erros.
-
-## 📁 Estrutura de uma Skill Completa
-
+### Passo 1: Verificar skills existentes
 ```
-.agents/skills/
-  minha-skill/
-    SKILL.md            ← Instruções + frontmatter YAML (OBRIGATÓRIO)
-    config.json         ← Configurações da skill (opcional)
-    scripts/            ← Scripts executáveis (opcional, mas recomendado)
-      main.py           ← Entry point Python (preferido)
-      main.ts           ← ou Node/TypeScript
-      helpers.py        ← Módulos auxiliares
-    tools/              ← Ferramentas que o LLM pode chamar (opcional)
-      buscar.json       ← Define uma tool chamável pelo agente
-    tests/              ← Testes automatizados (OBRIGATÓRIO para skills complexas)
-      test.py           ← Testes do script principal
-    README.md           ← Documentação para desenvolvedores (opcional)
+Use: list_skills (verbose: true)
 ```
+Verifique se já existe uma skill similar. Se existir, pergunte ao usuário se quer atualizar ou criar uma nova.
 
-## 📋 Processo de Criação (6 Etapas)
+### Passo 2: Planejar a skill
+Antes de chamar create_skill, pense:
+- **Nome**: kebab-case, descritivo, único (ex: "weather-api", "crypto-price", "pdf-reader")
+- **Runtime**: Python é o preferido (mais confiável no servidor)
+- **Scripts**: O que o script principal precisa fazer?
+- **Tools**: Que ferramentas o LLM poderá chamar?
+- **Deps**: Que bibliotecas são necessárias?
+- **Triggers**: Palavras que ativam sem LLM routing
 
-### Etapa 1: Análise e Planejamento
-- Entenda o que o usuário quer
-- Pesquise APIs, documentações e abordagens disponíveis
-- Se usar API de terceiros: leia a documentação oficial ANTES de codar
-- Defina: inputs → processamento → outputs
-- Liste edge cases e erros possíveis
+### Passo 3: Escrever o script principal
+O script DEVE seguir este contrato de I/O:
 
-### Etapa 2: Escrever o SKILL.md (Frontmatter + Instruções)
-O SKILL.md é o "cérebro" da skill — diz ao agente COMO usar ela.
-
-```yaml
----
-name: nome-da-skill              # kebab-case, único
-description: Uma frase clara     # O que a skill faz
-version: "1.0"
-author: SeuNome
-runtime: python                  # python | node | bash
-entrypoint: scripts/main.py
-dependencies:
-  pip:
-    - requests                   # Pacotes Python necessários
-  npm:
-    - axios                      # Pacotes Node (se runtime: node)
-api:
-  baseUrl: https://api.example.com/v1
-  authType: bearer               # bearer | api_key | basic | none
-  envVars:
-    - EXAMPLE_API_KEY            # Vars de ambiente que a skill precisa
-triggers:
-  - palavra1                     # Ativam a skill SEM chamar o LLM
-  - palavra2                     # Mais triggers = roteamento mais rápido
-tags:
-  - categoria
----
-```
-
-O conteúdo após o frontmatter são as **instruções para o agente** — como um prompt especializado:
-- Quando usar cada ferramenta
-- Como formatar respostas
-- Exemplos de uso
-- Regras de negócio
-
-### Etapa 3: Implementar os Scripts
-
-Scripts são o "músculo" da skill — executam ações reais no servidor.
-
-**Regras para scripts:**
-- Recebem argumentos via **stdin como JSON**
-- Retornam resultado via **stdout como JSON**
-- O campo `__tool__` no JSON indica qual ferramenta chamou
-- Erros vão para stderr ou campo `"error"` no JSON
-- Timeout padrão: 30 segundos
-- Máximo de output: 50KB
-
-**Template Python:**
 ```python
 #!/usr/bin/env python3
-import sys, json
+"""
+Skill: nome-da-skill
+Description: O que faz
+"""
+import sys
+import json
 
 def main():
-    args = json.loads(sys.stdin.read().strip() or '{}')
+    # Lê argumentos JSON do stdin
+    raw = sys.stdin.read().strip()
+    args = json.loads(raw) if raw else {}
+
+    # Identifica qual tool chamou este script
     tool = args.get('__tool__', '')
 
-    if 'buscar' in tool:
-        result = buscar(args)
+    # Roteamento por tool
+    if tool == 'minha_ferramenta':
+        result = minha_ferramenta(args)
+    elif tool == 'outra_ferramenta':
+        result = outra_ferramenta(args)
     else:
         result = {'error': f'Tool desconhecida: {tool}'}
 
+    # Retorna JSON no stdout
     print(json.dumps(result, ensure_ascii=False))
 
-def buscar(args):
-    # Sua lógica aqui
-    return {'status': 'ok', 'data': '...'}
+def minha_ferramenta(args):
+    try:
+        # Valida inputs
+        param = args.get('param', '')
+        if not param:
+            return {'error': 'Parâmetro "param" é obrigatório'}
+
+        # Sua lógica aqui
+        resultado = f"Processado: {param}"
+
+        return {
+            'status': 'ok',
+            'data': resultado
+        }
+    except Exception as e:
+        return {'error': f'Falha: {str(e)}'}
 
 if __name__ == '__main__':
     main()
 ```
 
-### Etapa 4: Definir Tools (Ferramentas)
-
-Cada arquivo JSON em `tools/` vira uma ferramenta que o LLM pode invocar.
+### Passo 4: Definir as Tools (ferramentas)
+Cada tool é um JSON Schema que diz ao LLM como usá-la:
 
 ```json
 {
-  "name": "nome_ferramenta",
-  "description": "O que faz — o LLM usa isso para decidir quando usar",
+  "name": "minha_ferramenta",
+  "description": "Faz X com Y — use quando o usuário pedir Z",
   "parameters": {
     "type": "object",
     "properties": {
-      "query": {
+      "param": {
         "type": "string",
-        "description": "Texto para buscar"
+        "description": "Descrição clara do parâmetro"
       }
     },
-    "required": ["query"]
+    "required": ["param"]
   },
   "script": "scripts/main.py",
   "runtime": "python"
 }
 ```
 
-**Boas práticas para tools:**
-- `name` deve ser descritivo e em snake_case
-- `description` deve ser clara — o LLM decide qual tool usar baseado NISTO
-- Parâmetros devem ter descriptions úteis
-- Todas apontam para um script que sabe processar o `__tool__`
+### Passo 5: Chamar create_skill
 
-### Etapa 5: Testar
-
-**NUNCA efetive uma skill sem testar.**
-
-Crie `tests/test.py` que:
-1. Chama o script principal com inputs conhecidos
-2. Valida que o output está no formato esperado
-3. Testa edge cases (input vazio, API fora do ar, dados inválidos)
-4. Testa cada tool separadamente
-
-```python
-#!/usr/bin/env python3
-import subprocess, json
-
-def run(args):
-    r = subprocess.run(['python3', 'scripts/main.py'],
-        input=json.dumps(args), capture_output=True, text=True, timeout=30)
-    return json.loads(r.stdout)
-
-def test_busca():
-    result = run({'__tool__': 'minha_busca', 'query': 'teste'})
-    assert 'error' not in result
-    assert 'data' in result
-    print('✅ test_busca ok')
-
-if __name__ == '__main__':
-    test_busca()
+```
+Use: create_skill com todos os campos:
+  - name, description, runtime, triggers, tags
+  - instructions (markdown detalhado para o agente)
+  - scripts (array com filename e content)
+  - tools (array com JSON Schema)
+  - dependencies_pip (se precisar de libs Python)
 ```
 
-### Etapa 6: Efetivar
+### Passo 6: Validar
 
-Só depois de todos os testes passarem:
-1. Mova a pasta da skill para `.agents/skills/`
-2. Execute `/reload` no Telegram para recarregar
-3. Teste no Telegram com uma mensagem real
-4. Confirme ao usuário que a skill está ativa
+```
+Use: validate_skill com o nome da skill criada
+```
 
-## 🔌 Integração com APIs de Terceiros
+Se houver erros, corrija e recrie com create_skill (ele sobrescreve).
 
-Quando uma skill precisa usar uma API externa:
+### Passo 7: Ativar
+Informe ao usuário que a skill foi criada e que precisa usar `/reload` no Telegram para ativá-la.
 
-1. **Leia a documentação oficial** da API antes de implementar
-2. **Use a URL da documentação** para entender: endpoints, autenticação, rate limits, formatos
-3. **Configure auth via env vars** — NUNCA hardcode API keys no código
-4. **Implemente retry** para erros temporários (429, 500, 503)
-5. **Cache quando possível** para economizar chamadas
-6. **Trate todos os erros** — APIs caem, retornam lixo, mudam sem aviso
+## ⚠️ Regras IMPORTANTES
 
-**Padrão de integração API:**
+### Scripts
+- **SEMPRE** leia do stdin com `sys.stdin.read()` (Python) ou `process.stdin` (Node)
+- **SEMPRE** retorne JSON no stdout com `print(json.dumps(result))`
+- **SEMPRE** trate o campo `__tool__` para saber qual ferramenta chamou
+- **SEMPRE** valide inputs e retorne `{"error": "mensagem"}` em caso de falha
+- **NUNCA** use `input()` — scripts NÃO são interativos
+- **NUNCA** imprima logs no stdout — use stderr para debug
+- **NUNCA** hardcode API keys — use `os.environ.get('CHAVE')`
+- **TIMEOUT**: 30s padrão, 5min máximo. Scripts lentos devem cachear resultados.
+
+### Tool Definitions
+- `name`: snake_case, descritivo (ex: `buscar_clima`, `gerar_resumo`)
+- `description`: Detalhada! O LLM decide qual tool usar baseado NISTO
+- `parameters.type`: SEMPRE "object"
+- `parameters.properties`: Cada propriedade com type + description
+- `parameters.required`: Lista de campos obrigatórios
+- `script`: Caminho relativo ao dir da skill (ex: "scripts/main.py")
+
+### Dependencies
+- Prefira stdlib Python (urllib, json, os, subprocess, re, datetime)
+- Se precisar de libs externas, liste em `dependencies_pip`
+- Use version pinning quando possível (ex: "requests>=2.28")
+
+### Triggers
+- Seja específico (ex: "previsão do tempo", "clima")
+- Evite triggers genéricos que conflitam com outras skills
+- Mais triggers = ativação mais rápida (pula routing LLM)
+
+### Instructions (corpo do SKILL.md)
+- Explique QUANDO o agente deve usar esta skill
+- Dê EXEMPLOS de uso (mensagens do usuário → resposta esperada)
+- Defina o FORMATO da resposta
+- Liste LIMITAÇÕES e edge cases
+
+## 📦 Templates por Tipo
+
+### Skill de API REST
+```
+dependencies_pip: ["requests>=2.28"]
+Script pattern: requests.get(url, headers=auth) → parse JSON → return
+Env vars: API_KEY no frontmatter api.envVars
+```
+
+### Skill de Processamento Local
+```
+dependencies_pip: [] (usa stdlib)
+Script pattern: Lê input → processa → retorna resultado
+Sem API externa
+```
+
+### Skill de Web Scraping
+```
+dependencies_pip: ["beautifulsoup4", "requests>=2.28"]
+Script pattern: requests.get(url) → BeautifulSoup(html) → extract data
+CUIDADO: sites podem bloquear, sempre trate erros HTTP
+```
+
+### Skill de Cálculo/Análise
+```
+dependencies_pip: ["numpy"] (se necessário)
+Script pattern: Recebe dados → calcula → retorna resultado formatado
+```
+
+## 🔍 Integração com APIs
+
+Quando o usuário quer integrar com uma API:
+
+1. **Pesquise a API** — Entenda endpoints, auth, rate limits
+2. **Configure auth** — Use `api_env_vars` para chaves
+3. **Implemente retry** — Para erros 429/500/503
+4. **Cache resultados** — Para economizar chamadas
+5. **Trate todos os erros** — APIs caem sem aviso
+
+Padrão recomendado com urllib (sem dependência):
 ```python
 import urllib.request
+import urllib.parse
 import json
 import os
 
-API_KEY = os.environ.get('MINHA_API_KEY', '')
-BASE_URL = 'https://api.servico.com/v1'
+API_KEY = os.environ.get('API_KEY', '')
 
 def api_call(endpoint, params=None):
-    url = f"{BASE_URL}/{endpoint}"
+    url = f"https://api.example.com/v1/{endpoint}"
     if params:
         url += '?' + urllib.parse.urlencode(params)
 
     req = urllib.request.Request(url)
     req.add_header('Authorization', f'Bearer {API_KEY}')
-    req.add_header('Content-Type', 'application/json')
 
     try:
         with urllib.request.urlopen(req, timeout=15) as resp:
             return json.loads(resp.read())
     except urllib.error.HTTPError as e:
-        return {'error': f'API error {e.code}: {e.reason}'}
+        return {'error': f'API {e.code}: {e.reason}'}
     except Exception as e:
-        return {'error': f'Request failed: {str(e)}'}
+        return {'error': str(e)}
 ```
 
-## ⚠️ Regras Importantes
+## 🚫 O que NÃO fazer
 
-- **NUNCA dependa de sites terceiros diretamente** — sempre use APIs oficiais
-- **NUNCA hardcode credenciais** — use variáveis de ambiente
-- **SEMPRE valide inputs** — o LLM pode enviar dados inesperados
-- **SEMPRE trate erros** — scripts que crasham são inúteis
-- **SEMPRE retorne JSON** — é o contrato entre script e agente
-- **SEMPRE teste antes de efetivar** — uma skill quebrada é pior que nenhuma skill
-- **Prefira Python** para scripts — é o runtime mais confiável no servidor
-- **Use urllib (stdlib)** em vez de requests quando possível — evita dependências extras
+- NÃO crie skills sem scripts (prompt-only skills são inúteis para automação)
+- NÃO crie skills com nomes genéricos como "util" ou "helper"
+- NÃO coloque múltiplas funcionalidades não relacionadas na mesma skill
+- NÃO ignore erros — retorne sempre JSON com campo "error"
+- NÃO faça scripts que demoram mais de 30s sem motivo
+- NÃO confie em URLs hardcoded — use configuração via env vars

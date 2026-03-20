@@ -2,6 +2,10 @@ import { BaseTool } from './BaseTool';
 import { CreateFileTool } from './builtin/CreateFileTool';
 import { ReadFileTool } from './builtin/ReadFileTool';
 import { GetDateTimeTool } from './builtin/GetDateTimeTool';
+import { CreateSkillTool } from './builtin/CreateSkillTool';
+import { ListSkillsTool } from './builtin/ListSkillsTool';
+import { DeleteSkillTool } from './builtin/DeleteSkillTool';
+import { ValidateSkillTool } from './builtin/ValidateSkillTool';
 import { ToolDefinition } from '../providers/ILlmProvider';
 import { logger } from '../utils/logger';
 
@@ -13,6 +17,13 @@ export class ToolRegistry {
     this.register(new CreateFileTool());
     this.register(new ReadFileTool());
     this.register(new GetDateTimeTool());
+
+    // Skill management tools
+    this.register(new CreateSkillTool());
+    this.register(new ListSkillsTool());
+    this.register(new DeleteSkillTool());
+    this.register(new ValidateSkillTool());
+
     logger.info(`ToolRegistry initialized with ${this.tools.size} built-in tools`);
   }
 
