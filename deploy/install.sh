@@ -266,6 +266,35 @@ fi
 # ══════════════════════════════════════════════════════════════
 step_header "Código-fonte BollaClaw" "📂"
 
+# ── Detect and migrate old installations ──────────────────────
+OLD_DIRS=("$HOME/bollaclaw" "$HOME/BollaClaw" "$HOME/BollaClaw/bollaclaw")
+for OLD_DIR in "${OLD_DIRS[@]}"; do
+  if [ -d "$OLD_DIR/.git" ] && [ "$OLD_DIR" != "$INSTALL_DIR" ]; then
+    warn "Instalação antiga encontrada em ${C}$OLD_DIR${NC}"
+    info "Migrando para ${C}$INSTALL_DIR${NC}..."
+
+    # Stop PM2 if running from old location
+    pm2 stop bollaclaw 2>/dev/null || true
+    pm2 delete bollaclaw 2>/dev/null || true
+
+    # Copy .env and data if they exist (preserve user config)
+    if [ -f "$OLD_DIR/.env" ] && [ ! -f "$INSTALL_DIR/.env" ]; then
+      mkdir -p "$INSTALL_DIR"
+      cp "$OLD_DIR/.env" "$INSTALL_DIR/.env" 2>/dev/null && ok "Migrado: .env"
+    fi
+    if [ -d "$OLD_DIR/data" ] && [ ! -d "$INSTALL_DIR/data" ]; then
+      mkdir -p "$INSTALL_DIR"
+      cp -r "$OLD_DIR/data" "$INSTALL_DIR/data" 2>/dev/null && ok "Migrado: data/"
+    fi
+
+    # Remove old installation
+    rm -rf "$OLD_DIR"
+    ok "Removida instalação antiga: ${C}$OLD_DIR${NC}"
+    break
+  fi
+done
+
+# ── Clone or update repository ────────────────────────────────
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-}")" 2>/dev/null && pwd || echo "")"
 if [ -n "$SCRIPT_DIR" ] && [ -f "$SCRIPT_DIR/../package.json" ]; then
   INSTALL_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
@@ -277,8 +306,8 @@ elif [ -d "$INSTALL_DIR/.git" ]; then
   git reset --hard HEAD >/dev/null 2>&1
   run_step "git pull" git pull --ff-only 2>/dev/null || {
     warn "Conflito no git — fazendo backup e re-clone..."
-    cd "$HOME"
-    mv "$INSTALL_DIR" "${INSTALL_DIR}.bak.$(date +%s)"
+    cd /tmp
+    mv "$INSTALL_DIR" "${INSTALL_DIR}.bak.$(date +%s)" 2>/dev/null || true
     run_step "Clonando repositório" git clone --quiet "$REPO_URL" "$INSTALL_DIR"
     cd "$INSTALL_DIR"
   }
@@ -286,6 +315,7 @@ elif [ -d "$INSTALL_DIR" ] && [ -f "$INSTALL_DIR/package.json" ]; then
   ok "Diretório existente: ${C}$INSTALL_DIR${NC}"
   cd "$INSTALL_DIR"
 else
+  mkdir -p "$(dirname "$INSTALL_DIR")"
   run_step "Clonando repositório" git clone --quiet "$REPO_URL" "$INSTALL_DIR"
   cd "$INSTALL_DIR"
 fi
@@ -322,7 +352,7 @@ step_header "Configuração do bot" "⚙️"
 
 # ── Generate admin password for web panel ──
 ADMIN_PASSWORD=$(openssl rand -base64 16 | tr -d '/+=' | head -c 16)
-ADMIN_PORT="${ADMIN_PORT:-3001}"
+ADMIN_PORT="${ADMIN_PORT:-21086}"
 
 if [ ! -f ".env" ]; then
   echo ""
