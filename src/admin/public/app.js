@@ -243,6 +243,10 @@ async function loadStatus() {
     state.status = await api('/status');
     renderDashboard();
   } catch { /* handled by api() */ }
+  try {
+    state.telemetry = await api('/telemetry-status');
+    renderBollaWatch();
+  } catch { /* BollaWatch status optional */ }
 }
 
 function renderDashboard() {
@@ -309,6 +313,32 @@ function renderDashboard() {
       toolsContainer.appendChild(tag);
     });
   }
+}
+
+function renderBollaWatch() {
+  const t = state.telemetry;
+  if (!t) return;
+
+  const badge = document.getElementById('bw-status-badge');
+  if (badge) {
+    if (!t.enabled) {
+      badge.textContent = 'Desativado';
+      badge.className = 'badge badge-gray';
+    } else if (t.connected && t.logForwarder?.connected) {
+      badge.textContent = 'Conectado';
+      badge.className = 'badge badge-green';
+    } else {
+      badge.textContent = 'Desconectado';
+      badge.className = 'badge badge-red';
+    }
+  }
+
+  const lf = t.logForwarder || {};
+  setInfo('bw-connection', t.connected ? 'Ativo' : 'Offline');
+  setInfo('bw-sent', (lf.totalSent || 0).toLocaleString());
+  setInfo('bw-dropped', (lf.totalDropped || 0).toLocaleString());
+  setInfo('bw-queue', lf.queueSize || 0);
+  setInfo('bw-instance', t.instanceId || '—');
 }
 
 function setStatCard(id, value, sub, percent, color) {

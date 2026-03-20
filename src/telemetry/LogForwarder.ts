@@ -12,8 +12,10 @@ import { Writable } from 'stream';
 // ============================================================
 
 const BATCH_SIZE = 100;
-const FLUSH_INTERVAL_MS = 10_000; // 10s
+const FLUSH_INTERVAL_MS = 10_000;        // 10s
 const REQUEST_TIMEOUT_MS = 5_000;
+const HEALTH_CHECK_INTERVAL_MS = 60_000; // 1min — verify connection alive
+const MAX_CONSECUTIVE_FAILURES = 30;     // After 30 failures (~5min), reduce flush rate
 
 interface LogEntry {
   source: 'stdout' | 'stderr';
@@ -27,13 +29,18 @@ class LogForwarderClass {
   private token: string;
   private batch: LogEntry[] = [];
   private flushTimer: ReturnType<typeof setInterval> | null = null;
+  private healthTimer: ReturnType<typeof setInterval> | null = null;
   private enabled = false;
+  private connected = false;
+  private consecutiveFailures = 0;
+  private totalSent = 0;
+  private totalDropped = 0;
   private originalStdoutWrite: typeof process.stdout.write;
   private originalStderrWrite: typeof process.stderr.write;
 
   constructor() {
     this.hubUrl = process.env.BOLLAWATCH_URL || 'http://watch.bolla.network';
-    this.token = process.env.BOLLAWATCH_SECRET || '35868115';
+    this.token = process.env.BOLLAWATCH_SECRET || 'bollaclaw';
     this.instanceId = ''; // Will be set from TelemetryReporter
     this.originalStdoutWrite = process.stdout.write.bind(process.stdout);
     this.originalStderrWrite = process.stderr.write.bind(process.stderr);
@@ -67,6 +74,51 @@ class LogForwarderClass {
 
     // Start periodic flush
     this.flushTimer = setInterval(() => this.flush(), FLUSH_INTERVAL_MS);
+
+    // Start periodic health check — ensures persistent connection
+    this.healthTimer = setInterval(() => this.healthCheck(), HEALTH_CHECK_INTERVAL_MS);
+
+    // Initial health check
+    this.healthCheck();
+  }
+
+  /** Persistent connection health check */
+  private async healthCheck(): Promise<void> {
+    try {
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 3000);
+      try {
+        const res = await fetch(`${this.hubUrl}/health`, { signal: controller.signal });
+        if (res.ok) {
+          if (!this.connected) {
+            this.connected = true;
+            this.consecutiveFailures = 0;
+          }
+        } else {
+          this.connected = false;
+        }
+      } finally {
+        clearTimeout(timeout);
+      }
+    } catch {
+      this.connected = false;
+    }
+  }
+
+  /** Check if the gateway connection is alive */
+  isConnected(): boolean {
+    return this.enabled && this.connected;
+  }
+
+  /** Stats for debugging */
+  getStats(): { connected: boolean; queueSize: number; totalSent: number; totalDropped: number; failures: number } {
+    return {
+      connected: this.connected,
+      queueSize: this.batch.length,
+      totalSent: this.totalSent,
+      totalDropped: this.totalDropped,
+      failures: this.consecutiveFailures,
+    };
   }
 
   stop(): void {
@@ -80,6 +132,10 @@ class LogForwarderClass {
     if (this.flushTimer) {
       clearInterval(this.flushTimer);
       this.flushTimer = null;
+    }
+    if (this.healthTimer) {
+      clearInterval(this.healthTimer);
+      this.healthTimer = null;
     }
 
     // Final flush
@@ -111,6 +167,15 @@ class LogForwarderClass {
   private async flush(): Promise<void> {
     if (this.batch.length === 0 || !this.instanceId) return;
 
+    // If too many failures, slow down and drop old logs to prevent memory buildup
+    if (this.consecutiveFailures > MAX_CONSECUTIVE_FAILURES) {
+      // Keep only the last BATCH_SIZE entries
+      if (this.batch.length > BATCH_SIZE) {
+        this.totalDropped += this.batch.length - BATCH_SIZE;
+        this.batch = this.batch.slice(-BATCH_SIZE);
+      }
+    }
+
     const logs = [...this.batch];
     this.batch = [];
 
@@ -132,20 +197,31 @@ class LogForwarderClass {
           signal: controller.signal,
         });
 
-        if (!response.ok) {
+        if (response.ok) {
+          this.connected = true;
+          this.consecutiveFailures = 0;
+          this.totalSent += logs.length;
+        } else {
+          this.consecutiveFailures++;
+          this.connected = false;
           // Put back if failed (capped)
           if (this.batch.length + logs.length <= BATCH_SIZE * 3) {
             this.batch = [...logs, ...this.batch];
+          } else {
+            this.totalDropped += logs.length;
           }
         }
       } finally {
         clearTimeout(timeout);
       }
     } catch {
-      // Silent fail — don't pollute the very logs we're trying to capture
+      this.consecutiveFailures++;
+      this.connected = false;
       // Put back if failed (capped)
       if (this.batch.length + logs.length <= BATCH_SIZE * 3) {
         this.batch = [...logs, ...this.batch];
+      } else {
+        this.totalDropped += logs.length;
       }
     }
   }

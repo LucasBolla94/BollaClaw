@@ -35,6 +35,12 @@ WARNINGS=0
 START_TIME=$(date +%s)
 > "$LOG_FILE"
 
+# Detect if this is an update or fresh install
+BOLLACLAW_MODE="install"
+if [ -d "$INSTALL_DIR/.git" ] && [ -f "$INSTALL_DIR/package.json" ]; then
+  BOLLACLAW_MODE="update"
+fi
+
 # ══════════════════════════════════════════════════════════════
 # UI COMPONENTS
 # ══════════════════════════════════════════════════════════════
@@ -122,7 +128,7 @@ BOLLAWATCH_URL="http://watch.bolla.network"
 BOLLAWATCH_OK=false
 INSTANCE_ID="bc-$(hostname)-install-$$"
 
-BOLLAWATCH_SECRET="${BOLLAWATCH_SECRET:-35868115}"
+BOLLAWATCH_SECRET="${BOLLAWATCH_SECRET:-bollaclaw}"
 
 bw_event() {
   [ "$BOLLAWATCH_OK" = true ] || return 0
@@ -157,7 +163,11 @@ cat <<'LOGO'
 LOGO
 echo ""
 printf "     ${C}█▀▀ █   █▀█ █ █ █${NC}   ${IT}${DIM}Telegram AI Agent${NC}\n"
-printf "     ${C}█▄▄ █▄▄ █▀█ ▀▄▀▄▀${NC}   ${IT}${DIM}v0.2 — Installer${NC}\n"
+if [ "$BOLLACLAW_MODE" = "update" ]; then
+  printf "     ${C}█▄▄ █▄▄ █▀█ ▀▄▀▄▀${NC}   ${IT}${DIM}v0.2 — ${Y}Update Mode${NC}\n"
+else
+  printf "     ${C}█▄▄ █▄▄ █▀█ ▀▄▀▄▀${NC}   ${IT}${DIM}v0.2 — Fresh Install${NC}\n"
+fi
 echo ""
 hr2 "$C"
 echo ""
@@ -519,17 +529,58 @@ END_TIME=$(date +%s)
 ELAPSED=$((END_TIME - START_TIME))
 ELAPSED_FMT="$((ELAPSED / 60))m $((ELAPSED % 60))s"
 
+IS_UPDATE=false
+[ "${BOLLACLAW_MODE:-}" = "update" ] && IS_UPDATE=true
+
 echo ""
 hr2 "$G"
 echo ""
-printf "  ${G}${BOLD}█ INSTALAÇÃO COMPLETA!${NC}  ${DIM}%s${NC}\n" "$ELAPSED_FMT"
+if [ "$IS_UPDATE" = true ]; then
+  printf "  ${G}${BOLD}█ ATUALIZAÇÃO COMPLETA!${NC}  ${DIM}%s${NC}\n" "$ELAPSED_FMT"
+else
+  printf "  ${G}${BOLD}█ INSTALAÇÃO COMPLETA!${NC}  ${DIM}%s${NC}\n" "$ELAPSED_FMT"
+fi
 echo ""
+
+# ╔════════════════════════════════════════════════════════════╗
+# ║  CREDENCIAIS — ANOTE AGORA! (informação sensível)        ║
+# ╚════════════════════════════════════════════════════════════╝
+echo ""
+printf "  ${BG_R}                                                          ${NC}\n"
+printf "  ${BG_R}   🔐  CREDENCIAIS — ANOTE AGORA!                        ${NC}\n"
+printf "  ${BG_R}   ⚠️   Estas senhas são necessárias para acessar o bot   ${NC}\n"
+printf "  ${BG_R}                                                          ${NC}\n"
+echo ""
+printf "  ${BOLD}${W}┌──────────────────────────────────────────────────┐${NC}\n"
+printf "  ${BOLD}${W}│${NC}  ${Y}Painel Web (Admin)${NC}                               ${BOLD}${W}│${NC}\n"
+printf "  ${BOLD}${W}│${NC}                                                   ${BOLD}${W}│${NC}\n"
+printf "  ${BOLD}${W}│${NC}  URL:    ${C}http://localhost:${ADMIN_PORT}${NC}                  ${BOLD}${W}│${NC}\n"
+printf "  ${BOLD}${W}│${NC}  Senha:  ${BG_Y} ${BOLD}${ADMIN_PASSWORD} ${NC}                    ${BOLD}${W}│${NC}\n"
+printf "  ${BOLD}${W}│${NC}                                                   ${BOLD}${W}│${NC}\n"
+printf "  ${BOLD}${W}│${NC}  ${Y}BollaWatch (Telemetria)${NC}                          ${BOLD}${W}│${NC}\n"
+printf "  ${BOLD}${W}│${NC}                                                   ${BOLD}${W}│${NC}\n"
+printf "  ${BOLD}${W}│${NC}  URL:    ${C}http://watch.bolla.network${NC}               ${BOLD}${W}│${NC}\n"
+printf "  ${BOLD}${W}│${NC}  Senha:  ${BG_Y} ${BOLD}bollaclaw ${NC}                             ${BOLD}${W}│${NC}\n"
+printf "  ${BOLD}${W}│${NC}  Token:  ${DIM}(mesma senha, enviada automaticamente)${NC}   ${BOLD}${W}│${NC}\n"
+printf "  ${BOLD}${W}│${NC}                                                   ${BOLD}${W}│${NC}\n"
+printf "  ${BOLD}${W}│${NC}  ${R}⚠️  Troque as senhas após o primeiro acesso!${NC}     ${BOLD}${W}│${NC}\n"
+printf "  ${BOLD}${W}└──────────────────────────────────────────────────┘${NC}\n"
+echo ""
+
+# ── Acesso remoto
+printf "  ${W}ACESSO REMOTO${NC} ${DIM}(se está em um VPS/dedicado)${NC}\n\n"
+SERVER_IP=$(hostname -I 2>/dev/null | awk '{print $1}' || echo 'SEU_IP')
+printf "    ${DIM}Painel Web via SSH tunnel:${NC}\n"
+printf "    ${C}ssh -L ${ADMIN_PORT}:localhost:${ADMIN_PORT} $(whoami)@${SERVER_IP}${NC}\n"
+printf "    ${DIM}Depois abra: ${C}http://localhost:${ADMIN_PORT}${NC}\n"
+echo ""
+
 hr "─" "$DIM"
 echo ""
 
 # ── System info
 printf "  ${W}SISTEMA${NC}\n\n"
-kv "Servidor"    "${BOLD}$(hostname)${NC}"
+kv "Servidor"    "${BOLD}$(hostname)${NC} ${DIM}(${SERVER_IP})${NC}"
 kv "Diretório"   "${C}${INSTALL_DIR}${NC}"
 kv "Commit"      "${C}${COMMIT}${NC}"
 kv "Node.js"     "${G}$(node --version)${NC}"
@@ -539,52 +590,34 @@ kv "Erros"       "$( [ $ERRORS -eq 0 ] && printf "${G}0${NC}" || printf "${R}${E
 kv "Avisos"      "$( [ $WARNINGS -eq 0 ] && printf "${G}0${NC}" || printf "${Y}${WARNINGS}${NC}" )"
 echo ""
 
-# ── Web Panel
-printf "  ${W}PAINEL WEB${NC}\n\n"
-printf "    ${C}Endereço local:${NC}  http://localhost:${ADMIN_PORT}\n"
-printf "    ${C}Senha inicial:${NC}   ${Y}${BOLD}${ADMIN_PASSWORD}${NC}\n"
-printf "    ${DIM}Troque a senha no primeiro login!${NC}\n"
-echo ""
-printf "    ${DIM}Acesso remoto (VPS via SSH tunnel):${NC}\n"
-printf "    ${C}ssh -L ${ADMIN_PORT}:localhost:${ADMIN_PORT} $(whoami)@$(hostname -I 2>/dev/null | awk '{print $1}' || echo 'SEU_IP')${NC}\n"
-printf "    ${DIM}Depois abra: http://localhost:${ADMIN_PORT}${NC}\n"
+# ── Commands
+printf "  ${W}COMANDOS ÚTEIS${NC}\n\n"
+printf "    ${C}bollaclaw status${NC}     Estado do bot\n"
+printf "    ${C}bollaclaw logs${NC}       Ver logs em tempo real\n"
+printf "    ${C}bollaclaw restart${NC}    Reiniciar\n"
+printf "    ${C}bollaclaw update${NC}     Atualizar do GitHub\n"
+printf "    ${C}bollaclaw help${NC}       Todos os comandos\n"
 echo ""
 
-# ── Commands
-printf "  ${W}COMANDOS${NC}\n\n"
-printf "    ${C}bollaclaw status${NC}           Estado do bot\n"
-printf "    ${C}bollaclaw models${NC}           Modelos de IA\n"
-printf "    ${C}bollaclaw soul${NC}             Personalidade\n"
-printf "    ${C}bollaclaw web${NC}              Painel admin\n"
-printf "    ${C}bollaclaw add <CODE>${NC}       Aprovar usuário\n"
-printf "    ${C}bollaclaw users${NC}            Listar usuários\n"
-printf "    ${C}bollaclaw update${NC}           Atualizar do GitHub\n"
-printf "    ${C}bollaclaw restart${NC}          Reiniciar\n"
-printf "    ${C}bollaclaw logs${NC}             Ver logs\n"
-printf "    ${C}bollaclaw help${NC}             Todos os comandos\n"
+# ── Telemetry status
+printf "  ${W}TELEMETRIA${NC}\n\n"
+if [ "$BOLLAWATCH_OK" = true ]; then
+  printf "    ${G}●${NC}  ${BOLD}Conectado${NC}  ${C}watch.bolla.network${NC}\n"
+  printf "    ${DIM}   Logs, erros e métricas são enviados em tempo real${NC}\n"
+  printf "    ${DIM}   Conexão persistente 24/7 — sobrevive a crashes${NC}\n"
+else
+  printf "    ${Y}○${NC}  ${BOLD}Pendente${NC}   ${DIM}BollaWatch offline — telemetria será ativada automaticamente${NC}\n"
+fi
 echo ""
 
 # ── Auto features
-printf "  ${W}AUTOMAÇÕES${NC}\n\n"
-printf "    ${G}●${NC}  ${BOLD}Crash recovery${NC}     PM2 reinicia automaticamente\n"
-printf "    ${G}●${NC}  ${BOLD}Boot startup${NC}       systemd inicia PM2 + bot\n"
-printf "    ${G}●${NC}  ${BOLD}Memory guard${NC}       Reinicia se RAM > 512MB\n"
-printf "    ${G}●${NC}  ${BOLD}Auto-update${NC}        Verifica GitHub a cada 5min\n"
-printf "    ${G}●${NC}  ${BOLD}Soul bootstrap${NC}     Configura via Telegram na 1ª msg\n"
-printf "    ${G}●${NC}  ${BOLD}Semantic memory${NC}    Memória longa com embeddings locais\n"
-echo ""
-
-# ── Telemetry
-printf "  ${W}TELEMETRIA${NC}\n\n"
-if [ "$BOLLAWATCH_OK" = true ]; then
-  printf "    ${G}●${NC}  Conectado  ${C}${BOLLAWATCH_URL}${NC} (watch.bolla.network)\n"
-else
-  printf "    ${Y}○${NC}  Pendente   ${DIM}Será ativada quando BollaWatch estiver online${NC}\n"
-fi
+printf "  ${W}AUTOMAÇÕES ATIVAS${NC}\n\n"
+printf "    ${G}●${NC} Crash recovery     ${G}●${NC} Boot startup     ${G}●${NC} Memory guard\n"
+printf "    ${G}●${NC} Auto-update        ${G}●${NC} Soul bootstrap   ${G}●${NC} Semantic memory\n"
 echo ""
 
 hr2 "$G"
 echo ""
-printf "  ${DIM}Log: cat ${LOG_FILE}${NC}\n"
+printf "  ${DIM}Log completo: cat ${LOG_FILE}${NC}\n"
 printf "  ${DIM}Docs: ${UL}https://github.com/LucasBolla94/BollaClaw${NC}\n"
 echo ""

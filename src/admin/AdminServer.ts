@@ -11,6 +11,8 @@ import { promisify } from 'util';
 import { config } from '../utils/config';
 import { logger, logBuffer, captureLog } from '../utils/logger';
 import { AgentController } from '../agent/AgentController';
+import { telemetry } from '../telemetry/TelemetryReporter';
+import { logForwarder } from '../telemetry/LogForwarder';
 
 // ============================================================
 // AdminServer — BollaClaw Web Panel (Security Hardened)
@@ -719,6 +721,23 @@ export function createAdminServer(controller: AgentController): express.Applicat
     controller.reloadIdentity();
     audit('RELOAD_IDENTITY', req.ip || 'unknown');
     res.json({ ok: true });
+  });
+
+  // ── BollaWatch telemetry status ──────────────────────────
+  app.get('/api/telemetry-status', auth, (_req: Request, res: Response) => {
+    const logStats = logForwarder.getStats();
+    res.json({
+      enabled: telemetry.isEnabled(),
+      connected: telemetry.isConnected(),
+      instanceId: telemetry.getInstanceId(),
+      logForwarder: {
+        connected: logStats.connected,
+        queueSize: logStats.queueSize,
+        totalSent: logStats.totalSent,
+        totalDropped: logStats.totalDropped,
+        failures: logStats.failures,
+      },
+    });
   });
 
   // ── Actions: PM2 restart ──────────────────────────────────

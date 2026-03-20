@@ -389,7 +389,7 @@ class TelemetryReporterClass {
 
   private async post(urlPath: string, body: unknown): Promise<void> {
     const url = `${this.hubUrl}${urlPath}`;
-    const token = process.env.BOLLAWATCH_SECRET || '35868115';
+    const token = process.env.BOLLAWATCH_SECRET || 'bollaclaw';
 
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
