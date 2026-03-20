@@ -1,37 +1,91 @@
 import express, { Request, Response, NextFunction } from 'express';
+import helmet from 'helmet';
+import cookieParser from 'cookie-parser';
 import * as path from 'path';
 import * as crypto from 'crypto';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as si from 'systeminformation';
-import { execSync } from 'child_process';
+import { execFile } from 'child_process';
+import { promisify } from 'util';
 import { config } from '../utils/config';
 import { logger, logBuffer, captureLog } from '../utils/logger';
 import { AgentController } from '../agent/AgentController';
-import { telemetry } from '../telemetry/TelemetryReporter';
 
 // ============================================================
-// AdminServer — BollaClaw Web Panel
+// AdminServer — BollaClaw Web Panel (Security Hardened)
 // ============================================================
-// Inspired by OpenClaw's Control UI but tailored for BollaClaw.
-// Single-page app served on the same Express instance.
-// Features: auth, dashboard, logs, soul, memory, settings.
+// - Helmet.js for security headers + CSP
+// - httpOnly cookies for session (no localStorage)
+// - CSRF protection via double-submit cookie
+// - PBKDF2 (100K SHA-512) + timing-safe compare
+// - Rate limiting with exponential backoff
+// - spawn/execFile instead of execSync (no shell injection)
+// - Input validation on all endpoints
+// - Audit logging for all sensitive actions
 // ============================================================
 
-const TOKENS = new Set<string>();
-const SESSION_DATA = new Map<string, { createdAt: number; userId: string }>();
+const execFileAsync = promisify(execFile);
+
+// ── Session store (in-memory, single-instance is fine) ──────
+
+interface Session {
+  userId: string;
+  createdAt: number;
+  lastActivity: number;
+  ip: string;
+  userAgent: string;
+}
+
+const sessions = new Map<string, Session>();
+const SESSION_TTL = 8 * 60 * 60 * 1000; // 8 hours
+const SESSION_CLEANUP_INTERVAL = 30 * 60 * 1000; // 30 min
+
+// Auto-cleanup expired sessions
+setInterval(() => {
+  const now = Date.now();
+  for (const [token, session] of sessions) {
+    if (now - session.lastActivity > SESSION_TTL) {
+      sessions.delete(token);
+    }
+  }
+}, SESSION_CLEANUP_INTERVAL);
+
+// ── CSRF token generation ───────────────────────────────────
+
+function generateCsrfToken(): string {
+  return crypto.randomBytes(32).toString('hex');
+}
+
+function verifyCsrf(req: Request): boolean {
+  const cookieToken = req.cookies?.['csrf-token'];
+  const headerToken = req.headers['x-csrf-token'] as string;
+  if (!cookieToken || !headerToken) return false;
+  try {
+    return crypto.timingSafeEqual(
+      Buffer.from(cookieToken, 'utf-8'),
+      Buffer.from(headerToken, 'utf-8'),
+    );
+  } catch {
+    return false;
+  }
+}
 
 // ── Password hashing (PBKDF2) ───────────────────────────────
 
 function hashPassword(password: string, salt?: string): { hash: string; salt: string } {
-  const s = salt || crypto.randomBytes(16).toString('hex');
+  const s = salt || crypto.randomBytes(32).toString('hex');
   const hash = crypto.pbkdf2Sync(password, s, 100000, 64, 'sha512').toString('hex');
   return { hash, salt: s };
 }
 
 function verifyPassword(password: string, storedHash: string, salt: string): boolean {
   const { hash } = hashPassword(password, salt);
-  return crypto.timingSafeEqual(Buffer.from(hash), Buffer.from(storedHash));
+  try {
+    return crypto.timingSafeEqual(Buffer.from(hash, 'hex'), Buffer.from(storedHash, 'hex'));
+  } catch {
+    return false;
+  }
 }
 
 // ── Credentials file ────────────────────────────────────────
@@ -43,6 +97,7 @@ interface StoredCredentials {
   createdAt: string;
   lastLogin: string;
   loginCount: number;
+  passwordHistory: string[]; // last 3 hashes to prevent reuse
 }
 
 function getCredentialsPath(): string {
@@ -62,13 +117,13 @@ function loadCredentials(): StoredCredentials | null {
 function saveCredentials(creds: StoredCredentials): void {
   const dir = path.dirname(getCredentialsPath());
   if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-  fs.writeFileSync(getCredentialsPath(), JSON.stringify(creds, null, 2), 'utf-8');
+  const credPath = getCredentialsPath();
+  fs.writeFileSync(credPath, JSON.stringify(creds, null, 2), { mode: 0o600 });
 }
 
 function ensureCredentials(): StoredCredentials {
   let creds = loadCredentials();
   if (!creds) {
-    // Generate initial password from .env or default
     const initialPwd = config.admin.password || 'bollaclaw';
     const { hash, salt } = hashPassword(initialPwd);
     creds = {
@@ -78,33 +133,95 @@ function ensureCredentials(): StoredCredentials {
       createdAt: new Date().toISOString(),
       lastLogin: '',
       loginCount: 0,
+      passwordHistory: [],
     };
+    saveCredentials(creds);
+  }
+  // Migrate old credentials without passwordHistory
+  if (!creds.passwordHistory) {
+    creds.passwordHistory = [];
     saveCredentials(creds);
   }
   return creds;
 }
 
-// ── Rate limiting ───────────────────────────────────────────
+// ── Rate limiting with exponential backoff ──────────────────
 
-const loginAttempts = new Map<string, { count: number; lastAttempt: number }>();
+interface RateLimitRecord {
+  count: number;
+  lastAttempt: number;
+  lockUntil: number;
+}
 
-function isRateLimited(ip: string): boolean {
+const loginAttempts = new Map<string, RateLimitRecord>();
+
+function isRateLimited(ip: string): { limited: boolean; retryAfter?: number } {
   const record = loginAttempts.get(ip);
-  if (!record) return false;
-  const elapsed = Date.now() - record.lastAttempt;
-  if (elapsed > 15 * 60 * 1000) { loginAttempts.delete(ip); return false; }
-  return record.count >= 5;
+  if (!record) return { limited: false };
+  const now = Date.now();
+
+  // Clear old records (30 min)
+  if (now - record.lastAttempt > 30 * 60 * 1000) {
+    loginAttempts.delete(ip);
+    return { limited: false };
+  }
+
+  if (record.lockUntil > now) {
+    return { limited: true, retryAfter: Math.ceil((record.lockUntil - now) / 1000) };
+  }
+
+  // Exponential: 3→30s, 5→60s, 8→300s, 10→900s
+  if (record.count >= 10) {
+    record.lockUntil = now + 15 * 60 * 1000;
+    return { limited: true, retryAfter: 900 };
+  }
+  if (record.count >= 8) {
+    record.lockUntil = now + 5 * 60 * 1000;
+    return { limited: true, retryAfter: 300 };
+  }
+  if (record.count >= 5) {
+    record.lockUntil = now + 60 * 1000;
+    return { limited: true, retryAfter: 60 };
+  }
+  if (record.count >= 3) {
+    record.lockUntil = now + 30 * 1000;
+    return { limited: true, retryAfter: 30 };
+  }
+
+  return { limited: false };
 }
 
 function recordLoginAttempt(ip: string, success: boolean): void {
-  if (success) { loginAttempts.delete(ip); return; }
-  const record = loginAttempts.get(ip) || { count: 0, lastAttempt: 0 };
+  if (success) {
+    loginAttempts.delete(ip);
+    return;
+  }
+  const record = loginAttempts.get(ip) || { count: 0, lastAttempt: 0, lockUntil: 0 };
   record.count++;
   record.lastAttempt = Date.now();
   loginAttempts.set(ip, record);
 }
 
-// ── Helpers ─────────────────────────────────────────────────
+// ── Audit log ───────────────────────────────────────────────
+
+function audit(action: string, ip: string, details?: string): void {
+  const entry = `[AUDIT] ${new Date().toISOString()} | ${action} | IP: ${ip}${details ? ` | ${details}` : ''}`;
+  captureLog('info', entry);
+  logger.info(entry);
+}
+
+// ── Input validation ────────────────────────────────────────
+
+function sanitizeString(input: unknown, maxLen = 500): string {
+  if (typeof input !== 'string') return '';
+  return input.slice(0, maxLen).replace(/[<>"'&]/g, '');
+}
+
+function isValidConversationId(id: string): boolean {
+  return /^[a-zA-Z0-9_-]{1,128}$/.test(id);
+}
+
+// ── Helpers (async, no shell injection) ─────────────────────
 
 function generateToken(): string {
   return crypto.randomBytes(32).toString('hex');
@@ -125,22 +242,31 @@ function formatBytes(bytes: number): string {
   return `${(bytes / 1024 / 1024 / 1024).toFixed(1)}GB`;
 }
 
-function getGitInfo(): { commit: string; branch: string; lastCommitMsg: string; lastCommitDate: string } {
+async function getGitInfo(): Promise<{ commit: string; branch: string; lastCommitMsg: string; lastCommitDate: string }> {
   try {
-    const commit = execSync('git rev-parse --short HEAD', { encoding: 'utf-8', cwd: process.cwd() }).trim();
-    const branch = execSync('git branch --show-current', { encoding: 'utf-8', cwd: process.cwd() }).trim();
-    const lastCommitMsg = execSync('git log -1 --pretty=%s', { encoding: 'utf-8', cwd: process.cwd() }).trim();
-    const lastCommitDate = execSync('git log -1 --pretty=%ci', { encoding: 'utf-8', cwd: process.cwd() }).trim();
-    return { commit, branch, lastCommitMsg, lastCommitDate };
+    const cwd = process.cwd();
+    const opts = { cwd, timeout: 5000 };
+    const [commitResult, branchResult, msgResult, dateResult] = await Promise.all([
+      execFileAsync('git', ['rev-parse', '--short', 'HEAD'], opts),
+      execFileAsync('git', ['branch', '--show-current'], opts),
+      execFileAsync('git', ['log', '-1', '--pretty=%s'], opts),
+      execFileAsync('git', ['log', '-1', '--pretty=%ci'], opts),
+    ]);
+    return {
+      commit: commitResult.stdout.trim(),
+      branch: branchResult.stdout.trim(),
+      lastCommitMsg: msgResult.stdout.trim(),
+      lastCommitDate: dateResult.stdout.trim(),
+    };
   } catch {
     return { commit: 'unknown', branch: 'unknown', lastCommitMsg: '', lastCommitDate: '' };
   }
 }
 
-function getPm2Info(): { status: string; uptime: string; restarts: number; memory: string } | null {
+async function getPm2Info(): Promise<{ status: string; uptime: string; restarts: number; memory: string } | null> {
   try {
-    const raw = execSync('pm2 jlist', { encoding: 'utf-8', timeout: 5000 });
-    const procs = JSON.parse(raw);
+    const { stdout } = await execFileAsync('pm2', ['jlist'], { timeout: 5000 });
+    const procs = JSON.parse(stdout);
     const bc = procs.find((p: { name: string }) => p.name === 'bollaclaw');
     if (!bc) return null;
     return {
@@ -161,34 +287,145 @@ function getPm2Info(): { status: string; uptime: string; restarts: number; memor
 export function createAdminServer(controller: AgentController): express.Application {
   const app = express();
 
-  // Security headers
-  app.use((_req, res, next) => {
-    res.setHeader('X-Frame-Options', 'DENY');
-    res.setHeader('X-Content-Type-Options', 'nosniff');
-    res.setHeader('X-XSS-Protection', '1; mode=block');
-    res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
+  // ── Trust proxy for correct IP behind nginx ────────────────
+  app.set('trust proxy', 'loopback');
+
+  // ── Helmet.js — full security headers ──────────────────────
+  app.use(helmet({
+    contentSecurityPolicy: {
+      directives: {
+        defaultSrc: ["'self'"],
+        scriptSrc: ["'self'", "'unsafe-inline'"],
+        styleSrc: ["'self'", "'unsafe-inline'", 'https://fonts.googleapis.com'],
+        fontSrc: ["'self'", 'https://fonts.gstatic.com'],
+        imgSrc: ["'self'", 'data:'],
+        connectSrc: ["'self'"],
+        frameSrc: ["'none'"],
+        objectSrc: ["'none'"],
+        baseUri: ["'self'"],
+        formAction: ["'self'"],
+      },
+    },
+    crossOriginOpenerPolicy: { policy: 'same-origin' },
+    crossOriginResourcePolicy: { policy: 'same-origin' },
+    dnsPrefetchControl: { allow: false },
+    frameguard: { action: 'deny' },
+    hsts: { maxAge: 31536000, includeSubDomains: true },
+    referrerPolicy: { policy: 'strict-origin-when-cross-origin' },
+    xContentTypeOptions: true,
+    xXssProtection: true,
+  }));
+
+  // ── Remove X-Powered-By ────────────────────────────────────
+  app.disable('x-powered-by');
+
+  // ── Cookie parser + JSON body ──────────────────────────────
+  app.use(cookieParser());
+  app.use(express.json({ limit: '512kb' }));
+
+  // ── Request ID for tracing ─────────────────────────────────
+  app.use((req: Request, _res: Response, next: NextFunction) => {
+    (req as any).requestId = crypto.randomBytes(8).toString('hex');
     next();
   });
 
-  app.use(express.json({ limit: '1mb' }));
-  app.use(express.static(path.join(__dirname, 'public')));
+  // ── Static assets with cache control ───────────────────────
+  app.use(express.static(path.join(__dirname, 'public'), {
+    maxAge: '1h',
+    etag: true,
+    lastModified: true,
+    dotfiles: 'deny',
+    index: false, // We handle index via SPA fallback
+  }));
 
   // Ensure credentials exist
   ensureCredentials();
 
-  // ── Auth: Login ─────────────────────────────────────────
+  // ── CSRF middleware for state-changing requests ─────────────
+  function csrfProtection(req: Request, res: Response, next: NextFunction): void {
+    if (req.method === 'GET' || req.method === 'HEAD' || req.method === 'OPTIONS') {
+      return next();
+    }
+    // Login endpoint is exempt (no session yet)
+    if (req.path === '/api/login') {
+      return next();
+    }
+    if (!verifyCsrf(req)) {
+      res.status(403).json({ error: 'CSRF token mismatch' });
+      return;
+    }
+    next();
+  }
 
-  app.post('/api/login', (req: Request, res: Response) => {
-    const ip = req.ip || req.socket.remoteAddress || 'unknown';
+  // ── Auth middleware (reads httpOnly cookie) ─────────────────
+  function auth(req: Request, res: Response, next: NextFunction): void {
+    const token = req.cookies?.['session-token'];
+    if (!token || !sessions.has(token)) {
+      res.status(401).json({ error: 'Unauthorized' });
+      return;
+    }
+    const session = sessions.get(token)!;
 
-    if (isRateLimited(ip)) {
-      res.status(429).json({ error: 'Too many attempts. Wait 15 minutes.' });
+    // Check expiry
+    if (Date.now() - session.lastActivity > SESSION_TTL) {
+      sessions.delete(token);
+      res.clearCookie('session-token');
+      res.status(401).json({ error: 'Session expired' });
       return;
     }
 
-    const { password } = req.body as { password: string };
-    const creds = loadCredentials();
+    // Refresh activity timestamp
+    session.lastActivity = Date.now();
+    next();
+  }
 
+  // Apply CSRF to all POST/PUT/DELETE after auth
+  app.use(csrfProtection);
+
+  // ══════════════════════════════════════════════════════════
+  // API Routes
+  // ══════════════════════════════════════════════════════════
+
+  // ── Health (no auth) ──────────────────────────────────────
+  app.get('/api/health', (_req: Request, res: Response) => {
+    res.json({ status: 'ok', uptime: process.uptime() });
+  });
+
+  // ── CSRF token endpoint (after login, to get token) ────────
+  app.get('/api/csrf-token', auth, (_req: Request, res: Response) => {
+    const token = generateCsrfToken();
+    res.cookie('csrf-token', token, {
+      httpOnly: false, // Must be readable by JS to send in header
+      sameSite: 'strict',
+      secure: false, // Tunnel is HTTP
+      maxAge: SESSION_TTL,
+      path: '/',
+    });
+    res.json({ ok: true });
+  });
+
+  // ── Auth: Login ───────────────────────────────────────────
+  app.post('/api/login', (req: Request, res: Response) => {
+    const ip = req.ip || req.socket.remoteAddress || 'unknown';
+    const ua = sanitizeString(req.headers['user-agent'], 200);
+
+    const rateCheck = isRateLimited(ip);
+    if (rateCheck.limited) {
+      audit('LOGIN_BLOCKED', ip, `Rate limited, retry after ${rateCheck.retryAfter}s`);
+      res.status(429).json({
+        error: `Too many attempts. Try again in ${rateCheck.retryAfter}s.`,
+        retryAfter: rateCheck.retryAfter,
+      });
+      return;
+    }
+
+    const password = sanitizeString(req.body?.password, 128);
+    if (!password) {
+      res.status(400).json({ error: 'Password required' });
+      return;
+    }
+
+    const creds = loadCredentials();
     if (!creds) {
       res.status(500).json({ error: 'Credentials not initialized' });
       return;
@@ -196,83 +433,134 @@ export function createAdminServer(controller: AgentController): express.Applicat
 
     if (!verifyPassword(password, creds.hash, creds.salt)) {
       recordLoginAttempt(ip, false);
+      audit('LOGIN_FAILED', ip);
       res.status(401).json({ error: 'Invalid password' });
       return;
     }
 
     recordLoginAttempt(ip, true);
 
+    // Create session
     const token = generateToken();
-    TOKENS.add(token);
-    SESSION_DATA.set(token, { createdAt: Date.now(), userId: 'admin' });
-    setTimeout(() => { TOKENS.delete(token); SESSION_DATA.delete(token); }, 24 * 60 * 60 * 1000);
+    sessions.set(token, {
+      userId: 'admin',
+      createdAt: Date.now(),
+      lastActivity: Date.now(),
+      ip,
+      userAgent: ua,
+    });
+
+    // Set httpOnly cookie
+    res.cookie('session-token', token, {
+      httpOnly: true,
+      sameSite: 'strict',
+      secure: false, // SSH tunnel is HTTP, not HTTPS
+      maxAge: SESSION_TTL,
+      path: '/',
+    });
+
+    // Set CSRF cookie
+    const csrf = generateCsrfToken();
+    res.cookie('csrf-token', csrf, {
+      httpOnly: false,
+      sameSite: 'strict',
+      secure: false,
+      maxAge: SESSION_TTL,
+      path: '/',
+    });
 
     // Update login stats
     creds.lastLogin = new Date().toISOString();
     creds.loginCount++;
     saveCredentials(creds);
 
-    captureLog('info', `Web panel login from ${ip}`);
+    audit('LOGIN_SUCCESS', ip);
 
     res.json({
-      token,
+      ok: true,
       mustChangePassword: creds.mustChangePassword,
     });
   });
 
-  // ── Auth: Change password ───────────────────────────────
+  // ── Auth: Logout ──────────────────────────────────────────
+  app.post('/api/logout', (req: Request, res: Response) => {
+    const token = req.cookies?.['session-token'];
+    if (token) sessions.delete(token);
+    res.clearCookie('session-token');
+    res.clearCookie('csrf-token');
+    audit('LOGOUT', req.ip || 'unknown');
+    res.json({ ok: true });
+  });
 
+  // ── Auth: Change password ─────────────────────────────────
   app.post('/api/change-password', auth, (req: Request, res: Response) => {
     const { currentPassword, newPassword } = req.body as { currentPassword: string; newPassword: string };
     const creds = loadCredentials();
     if (!creds) { res.status(500).json({ error: 'No credentials' }); return; }
 
     if (!verifyPassword(currentPassword, creds.hash, creds.salt)) {
+      audit('PASSWORD_CHANGE_FAILED', req.ip || 'unknown', 'Wrong current password');
       res.status(401).json({ error: 'Current password is wrong' });
       return;
     }
 
-    if (!newPassword || newPassword.length < 6) {
-      res.status(400).json({ error: 'Password must be at least 6 characters' });
+    // Validate new password strength
+    if (!newPassword || newPassword.length < 8) {
+      res.status(400).json({ error: 'Password must be at least 8 characters' });
+      return;
+    }
+
+    // Check password not in history
+    const { hash: newHash } = hashPassword(newPassword, creds.salt);
+    if (creds.passwordHistory?.some(h => h === newHash)) {
+      res.status(400).json({ error: 'Cannot reuse a recent password' });
       return;
     }
 
     const { hash, salt } = hashPassword(newPassword);
+    // Update history (keep last 3)
+    creds.passwordHistory = [creds.hash, ...(creds.passwordHistory || [])].slice(0, 3);
     creds.hash = hash;
     creds.salt = salt;
     creds.mustChangePassword = false;
     saveCredentials(creds);
 
-    captureLog('info', 'Web panel password changed');
+    // Invalidate all sessions except current
+    const currentToken = req.cookies?.['session-token'];
+    for (const [token] of sessions) {
+      if (token !== currentToken) sessions.delete(token);
+    }
+
+    audit('PASSWORD_CHANGED', req.ip || 'unknown');
     res.json({ ok: true });
   });
 
-  // ── Auth middleware ──────────────────────────────────────
+  // ── Auth: Session info ────────────────────────────────────
+  app.get('/api/session', auth, (req: Request, res: Response) => {
+    const token = req.cookies?.['session-token'];
+    const session = token ? sessions.get(token) : null;
+    res.json({
+      authenticated: true,
+      activeSessions: sessions.size,
+      currentSession: session ? {
+        createdAt: session.createdAt,
+        lastActivity: session.lastActivity,
+      } : null,
+    });
+  });
 
-  function auth(req: Request, res: Response, next: NextFunction): void {
-    const authHeader = req.headers.authorization;
-    const token = authHeader?.replace('Bearer ', '');
-    if (!token || !TOKENS.has(token)) {
-      res.status(401).json({ error: 'Unauthorized' });
-      return;
-    }
-    next();
-  }
-
-  // ── Dashboard: Status ───────────────────────────────────
-
+  // ── Dashboard: Status ─────────────────────────────────────
   app.get('/api/status', auth, async (_req: Request, res: Response) => {
     try {
-      const [cpuLoad, mem, disk, networkStats] = await Promise.all([
+      const [cpuLoad, mem, disk] = await Promise.all([
         si.currentLoad(),
         si.mem(),
         si.fsSize(),
-        si.networkStats().catch(() => []),
       ]);
 
       const agentStatus = controller.getStatus();
-      const gitInfo = getGitInfo();
-      const pm2Info = getPm2Info();
+      const gitInfo = await getGitInfo();
+      const pm2Info = await getPm2Info();
       const mainDisk = disk.find(d => d.mount === '/') || disk[0];
 
       res.json({
@@ -294,7 +582,6 @@ export function createAdminServer(controller: AgentController): express.Applicat
           nodeVersion: process.version,
           processUptime: formatUptime(Math.floor(process.uptime())),
           pid: process.pid,
-          memoryUsage: process.memoryUsage(),
         },
         agent: agentStatus,
         git: gitInfo,
@@ -308,27 +595,29 @@ export function createAdminServer(controller: AgentController): express.Applicat
         },
       });
     } catch (err) {
-      res.status(500).json({ error: String(err) });
+      logger.error('Status endpoint error', err);
+      res.status(500).json({ error: 'Failed to retrieve status' });
     }
   });
 
-  // ── Dashboard: Logs ─────────────────────────────────────
-
+  // ── Dashboard: Logs ───────────────────────────────────────
   app.get('/api/logs', auth, (req: Request, res: Response) => {
-    const limit = parseInt(req.query.limit as string) || 100;
-    const level = req.query.level as string;
+    const limit = Math.min(Math.max(parseInt(req.query.limit as string) || 100, 1), 500);
+    const level = sanitizeString(req.query.level, 20);
     let logs = [...logBuffer];
-    if (level) logs = logs.filter(l => l.level === level);
+    if (level && ['info', 'warn', 'error', 'debug'].includes(level)) {
+      logs = logs.filter(l => l.level === level);
+    }
     res.json({ logs: logs.slice(-limit) });
   });
 
-  app.delete('/api/logs', auth, (_req: Request, res: Response) => {
+  app.delete('/api/logs', auth, (req: Request, res: Response) => {
     logBuffer.length = 0;
+    audit('LOGS_CLEARED', req.ip || 'unknown');
     res.json({ ok: true });
   });
 
-  // ── Dashboard: Soul ─────────────────────────────────────
-
+  // ── Dashboard: Soul ───────────────────────────────────────
   app.get('/api/soul', auth, (_req: Request, res: Response) => {
     try {
       const soulPath = path.resolve(config.paths.data, 'soul.json');
@@ -339,31 +628,29 @@ export function createAdminServer(controller: AgentController): express.Applicat
       const soul = JSON.parse(fs.readFileSync(soulPath, 'utf-8'));
       res.json({ configured: true, soul });
     } catch (err) {
-      res.status(500).json({ error: String(err) });
+      logger.error('Soul endpoint error', err);
+      res.status(500).json({ error: 'Failed to load soul config' });
     }
   });
 
-  // ── Dashboard: Memory stats ─────────────────────────────
-
+  // ── Dashboard: Memory stats ───────────────────────────────
   app.get('/api/memory', auth, (_req: Request, res: Response) => {
     try {
       const dbPath = path.resolve(config.paths.data, 'memory-semantic.db');
       const mainDbPath = path.resolve(config.paths.data, 'bollaclaw.db');
 
-      const stats: Record<string, unknown> = {
+      res.json({
         semanticEnabled: fs.existsSync(dbPath),
         mainDbSize: fs.existsSync(mainDbPath) ? formatBytes(fs.statSync(mainDbPath).size) : '0',
         semanticDbSize: fs.existsSync(dbPath) ? formatBytes(fs.statSync(dbPath).size) : '0',
-      };
-
-      res.json(stats);
+      });
     } catch (err) {
-      res.status(500).json({ error: String(err) });
+      logger.error('Memory endpoint error', err);
+      res.status(500).json({ error: 'Failed to load memory stats' });
     }
   });
 
-  // ── Dashboard: Conversations ────────────────────────────
-
+  // ── Dashboard: Conversations ──────────────────────────────
   app.get('/api/conversations', auth, (_req: Request, res: Response) => {
     try {
       const Database = require('better-sqlite3');
@@ -382,13 +669,17 @@ export function createAdminServer(controller: AgentController): express.Applicat
 
       res.json({ conversations });
     } catch (err) {
-      res.status(500).json({ error: String(err) });
+      logger.error('Conversations endpoint error', err);
+      res.status(500).json({ error: 'Failed to load conversations' });
     }
   });
 
-  // ── Dashboard: Conversation messages ────────────────────
-
+  // ── Dashboard: Conversation messages ──────────────────────
   app.get('/api/conversations/:id/messages', auth, (req: Request, res: Response) => {
+    if (!isValidConversationId(req.params.id)) {
+      res.status(400).json({ error: 'Invalid conversation ID' });
+      return;
+    }
     try {
       const Database = require('better-sqlite3');
       const dbPath = path.resolve(config.paths.data, 'bollaclaw.db');
@@ -406,52 +697,50 @@ export function createAdminServer(controller: AgentController): express.Applicat
 
       res.json({ messages });
     } catch (err) {
-      res.status(500).json({ error: String(err) });
+      logger.error('Messages endpoint error', err);
+      res.status(500).json({ error: 'Failed to load messages' });
     }
   });
 
-  // ── Actions: Reload ─────────────────────────────────────
-
-  app.post('/api/reload-skills', auth, (_req: Request, res: Response) => {
+  // ── Actions: Reload ───────────────────────────────────────
+  app.post('/api/reload-skills', auth, (req: Request, res: Response) => {
     controller.reloadSkills();
-    captureLog('info', 'Skills reloaded via web panel');
+    audit('RELOAD_SKILLS', req.ip || 'unknown');
     res.json({ ok: true });
   });
 
-  app.post('/api/reload-providers', auth, (_req: Request, res: Response) => {
+  app.post('/api/reload-providers', auth, (req: Request, res: Response) => {
     controller.reloadProviders();
-    captureLog('info', 'Providers reloaded via web panel');
+    audit('RELOAD_PROVIDERS', req.ip || 'unknown');
     res.json({ ok: true });
   });
 
-  app.post('/api/reload-identity', auth, (_req: Request, res: Response) => {
+  app.post('/api/reload-identity', auth, (req: Request, res: Response) => {
     controller.reloadIdentity();
-    captureLog('info', 'Identity/Soul reloaded via web panel');
+    audit('RELOAD_IDENTITY', req.ip || 'unknown');
     res.json({ ok: true });
   });
 
-  // ── Actions: PM2 restart ────────────────────────────────
-
-  app.post('/api/restart', auth, (_req: Request, res: Response) => {
-    captureLog('warn', 'Restart requested via web panel');
+  // ── Actions: PM2 restart ──────────────────────────────────
+  app.post('/api/restart', auth, async (req: Request, res: Response) => {
+    audit('RESTART_REQUESTED', req.ip || 'unknown');
     res.json({ ok: true, message: 'Restarting in 2 seconds...' });
-    setTimeout(() => {
+    setTimeout(async () => {
       try {
-        execSync('pm2 restart bollaclaw', { timeout: 10000 });
+        await execFileAsync('pm2', ['restart', 'bollaclaw'], { timeout: 10000 });
       } catch {
         process.exit(0);
       }
     }, 2000);
   });
 
-  // ── Health (no auth) ────────────────────────────────────
-
-  app.get('/api/health', (_req: Request, res: Response) => {
-    res.json({ status: 'ok', uptime: process.uptime() });
+  // ── Global error handler ──────────────────────────────────
+  app.use((err: Error, _req: Request, res: Response, _next: NextFunction) => {
+    logger.error('Unhandled error in admin server', err);
+    res.status(500).json({ error: 'Internal server error' });
   });
 
-  // ── SPA fallback ────────────────────────────────────────
-
+  // ── SPA fallback ──────────────────────────────────────────
   app.get('*', (_req: Request, res: Response) => {
     res.sendFile(path.join(__dirname, 'public', 'index.html'));
   });

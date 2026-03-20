@@ -540,7 +540,7 @@ function cmdWeb() {
   ${BOLD}Acesso remoto (SSH tunnel):${NC}
     ${DIM}No seu computador, execute:${NC}
 
-    ${G}ssh -L ${port}:localhost:${port} ubuntu@${serverHostname}${NC}
+    ${G}ssh -L ${port}:localhost:${port} ubuntu@${hostname}${NC}
 
     ${DIM}Depois abra no navegador:${NC}
     ${C}http://localhost:${port}${NC}
