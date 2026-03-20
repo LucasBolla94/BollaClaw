@@ -159,11 +159,23 @@ printf "  ${W}User${NC}         $(whoami)\n"
 printf "  ${W}Data${NC}         $(date '+%Y-%m-%d %H:%M:%S')\n"
 echo ""
 
-# Pre-flight check
+# Pre-flight checks
 if ! command -v apt &>/dev/null; then
   printf "  ${BG_R} ERRO ${NC} Este script requer ${BOLD}Ubuntu/Debian${NC}.\n"
   printf "  ${DIM}Sistemas suportados: Ubuntu 22.04+, Debian 12+${NC}\n\n"
   exit 1
+fi
+
+# Sudo check — ensure passwordless sudo works for automated install
+if sudo -n true 2>/dev/null; then
+  printf "  ${G}✓${NC}  sudo ${G}disponível${NC} (NOPASSWD)\n"
+else
+  printf "  ${Y}⚠${NC}  sudo ${Y}requer senha${NC} — preparando sudo...\n"
+  # Prompt for password once at start, cache for rest of script
+  sudo -v 2>/dev/null || {
+    printf "  ${R}✗${NC}  sudo não disponível — usando ${C}\$HOME/bollaclaw${NC}\n"
+    INSTALL_DIR="$HOME/bollaclaw"
+  }
 fi
 
 # ══════════════════════════════════════════════════════════════
@@ -206,8 +218,12 @@ fi
 # ══════════════════════════════════════════════════════════════
 step_header "Atualizando pacotes do sistema" "🔄"
 
-run_step "apt update" sudo apt update -qq
-run_step "apt upgrade" sudo apt upgrade -y -qq
+if [ "$CAN_SUDO" = true ]; then
+  run_step "apt update" sudo apt update -qq
+  run_step "apt upgrade" sudo apt upgrade -y -qq
+else
+  warn "Sem sudo — pulando apt update/upgrade"
+fi
 
 # ══════════════════════════════════════════════════════════════
 # STEP 3 — Node.js
@@ -226,8 +242,14 @@ if command -v node &>/dev/null; then
 fi
 
 if [ "$NEED_NODE" = true ]; then
-  run_step "Configurando repositório NodeSource 20.x" bash -c 'curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -'
-  run_step "Instalando Node.js 20 LTS" sudo apt install -y -qq nodejs
+  if [ "$CAN_SUDO" = true ]; then
+    run_step "Configurando repositório NodeSource 20.x" bash -c 'curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -'
+    run_step "Instalando Node.js 20 LTS" sudo apt install -y -qq nodejs
+  else
+    printf "    ${R}✗${NC}  Node.js 20 não encontrado e sem sudo para instalar\n"
+    printf "    ${DIM}Instale manualmente: curl -fsSL https://deb.nodesource.com/setup_20.x | sudo bash -${NC}\n"
+    exit 1
+  fi
 fi
 
 kv "Node" "${G}$(node --version)${NC}"
@@ -242,7 +264,11 @@ step_header "PM2 — Process Manager" "🔧"
 if command -v pm2 &>/dev/null; then
   ok "PM2 ${G}v$(pm2 --version)${NC} disponível"
 else
-  run_step "Instalando PM2 globalmente" sudo npm install -g pm2
+  if [ "$CAN_SUDO" = true ]; then
+    run_step "Instalando PM2 globalmente" sudo npm install -g pm2
+  else
+    run_step "Instalando PM2 globalmente" npm install -g pm2
+  fi
   ok "PM2 ${G}v$(pm2 --version)${NC} instalado"
 fi
 
@@ -251,7 +277,11 @@ fi
 # ══════════════════════════════════════════════════════════════
 step_header "Dependências do sistema" "📦"
 
-run_step "build-essential, python3, ffmpeg" sudo apt install -y -qq build-essential python3 python3-pip ffmpeg
+if [ "$CAN_SUDO" = true ]; then
+  run_step "build-essential, python3, ffmpeg" sudo apt install -y -qq build-essential python3 python3-pip ffmpeg
+else
+  warn "Sem sudo — pulando instalação de dependências do sistema"
+fi
 
 if command -v python3 &>/dev/null; then
   run_step "edge-tts (text-to-speech)" bash -c 'pip3 install edge-tts --break-system-packages -q 2>/dev/null || pip3 install edge-tts -q 2>/dev/null || true'
@@ -268,6 +298,13 @@ step_header "Código-fonte BollaClaw" "📂"
 
 # ── Ensure install directory is writable ───────────────────────
 # /opt requires sudo — create dir and set ownership to current user
+# Falls back to $HOME/bollaclaw if sudo is not available (no NOPASSWD)
+# Re-check sudo after pre-flight (may have been cached by sudo -v above)
+CAN_SUDO=false
+if sudo -n true 2>/dev/null; then
+  CAN_SUDO=true
+fi
+
 ensure_install_dir() {
   local dir="$1"
   local parent="$(dirname "$dir")"
@@ -279,12 +316,24 @@ ensure_install_dir() {
   if [ ! -d "$dir" ]; then
     if [ -w "$parent" ]; then
       mkdir -p "$dir"
-    else
+    elif [ "$CAN_SUDO" = true ]; then
       sudo mkdir -p "$dir"
       sudo chown "$(whoami):$(id -gn)" "$dir"
+    else
+      # Fallback: can't write to parent and no sudo — switch to $HOME
+      INSTALL_DIR="$HOME/bollaclaw"
+      warn "Sem permissão para criar ${C}${dir}${NC} — usando ${C}${INSTALL_DIR}${NC}"
+      mkdir -p "$INSTALL_DIR"
+      return 0
     fi
   elif [ ! -w "$dir" ]; then
-    sudo chown -R "$(whoami):$(id -gn)" "$dir"
+    if [ "$CAN_SUDO" = true ]; then
+      sudo chown -R "$(whoami):$(id -gn)" "$dir"
+    else
+      INSTALL_DIR="$HOME/bollaclaw"
+      warn "Sem permissão em ${C}${dir}${NC} — usando ${C}${INSTALL_DIR}${NC}"
+      mkdir -p "$INSTALL_DIR"
+    fi
   fi
 }
 
@@ -339,10 +388,10 @@ elif [ -d "$INSTALL_DIR" ] && [ -f "$INSTALL_DIR/package.json" ]; then
   ok "Diretório existente: ${C}$INSTALL_DIR${NC}"
   cd "$INSTALL_DIR"
 else
-  ensure_install_dir "$(dirname "$INSTALL_DIR")"
+  ensure_install_dir "$INSTALL_DIR"
   run_step "Clonando repositório" git clone --quiet "$REPO_URL" "$INSTALL_DIR"
   # Ensure ownership after clone
-  if [ ! -w "$INSTALL_DIR" ]; then
+  if [ ! -w "$INSTALL_DIR" ] && [ "$CAN_SUDO" = true ]; then
     sudo chown -R "$(whoami):$(id -gn)" "$INSTALL_DIR"
   fi
   cd "$INSTALL_DIR"
@@ -370,7 +419,11 @@ bw_event "info" "Build completo — commit $COMMIT"
 step_header "BollaClaw CLI" "⌨️"
 
 chmod +x dist/bin/bollaclaw.js 2>/dev/null || true
-run_step "Registrando comando global 'bollaclaw'" sudo npm link --silent
+if [ "$CAN_SUDO" = true ]; then
+  run_step "Registrando comando global 'bollaclaw'" sudo npm link --silent
+else
+  run_step "Registrando comando global 'bollaclaw'" npm link --silent
+fi
 ok "Comando ${C}bollaclaw${NC} disponível globalmente"
 
 # ══════════════════════════════════════════════════════════════
@@ -423,7 +476,7 @@ fi
 if grep -q "STT_PROVIDER=local_whisper" .env 2>/dev/null; then
   echo ""
   info "Configurando transcrição de áudio local..."
-  run_step "Instalando openai-whisper + torch CPU" bash -c 'pip3 install openai-whisper --break-system-packages -q 2>/dev/null || pip3 install openai-whisper -q 2>/dev/null'
+  run_step "Instalando openai-whisper + torch CPU" bash -c 'pip3 install openai-whisper --break-system-packages --user -q 2>/dev/null || pip3 install openai-whisper --user -q 2>/dev/null || pip3 install openai-whisper -q 2>/dev/null'
   run_step "Baixando modelo whisper-base (~150MB)" bash -c 'python3 -c "import whisper; whisper.load_model(\"base\")" 2>/dev/null || true'
   ok "Whisper local pronto ${DIM}(pt-BR + en)${NC}"
 fi
@@ -438,9 +491,13 @@ printf "\n  ${BOLD}Iniciando serviço...${NC}\n\n"
 run_step "Iniciando BollaClaw via PM2" pm2 start ecosystem.config.js
 run_step "Salvando configuração PM2" pm2 save
 
-PM2_STARTUP=$(pm2 startup systemd -u "$(whoami)" --hp "$HOME" 2>&1 | grep "sudo" | head -1)
-if [ -n "$PM2_STARTUP" ]; then
-  eval "$PM2_STARTUP" >> "$LOG_FILE" 2>&1 || warn "Execute manualmente: $PM2_STARTUP"
+if [ "$CAN_SUDO" = true ]; then
+  PM2_STARTUP=$(pm2 startup systemd -u "$(whoami)" --hp "$HOME" 2>&1 | grep "sudo" | head -1)
+  if [ -n "$PM2_STARTUP" ]; then
+    eval "$PM2_STARTUP" >> "$LOG_FILE" 2>&1 || warn "Execute manualmente: $PM2_STARTUP"
+  fi
+else
+  warn "Sem sudo — auto-start no boot não configurado"
 fi
 pm2 save >> "$LOG_FILE" 2>&1
 ok "Auto-start no boot configurado via systemd"
