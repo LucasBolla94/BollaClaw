@@ -7,6 +7,8 @@ import { SkillRouter } from '../skills/SkillRouter';
 import { SkillExecutor } from '../skills/SkillExecutor';
 import { AgentLoop, AgentResult } from './AgentLoop';
 import { OnboardManager, IdentityConfig } from '../onboard/OnboardManager';
+import { SoulEngine } from '../soul/SoulEngine';
+import { SoulBootstrap } from '../soul/SoulBootstrap';
 import { config } from '../utils/config';
 import { logger, captureLog } from '../utils/logger';
 import { telemetry } from '../telemetry/TelemetryReporter';
@@ -17,6 +19,8 @@ export class AgentController {
   private skillLoader: SkillLoader;
   private skillExecutor: SkillExecutor;
   private onboardManager: OnboardManager;
+  private soulEngine: SoulEngine;
+  private soulBootstrap: SoulBootstrap;
   private skills: Skill[] = [];
   private identity: IdentityConfig | null = null;
   private isReady = false;
@@ -27,6 +31,11 @@ export class AgentController {
     this.skillLoader = new SkillLoader();
     this.skillExecutor = new SkillExecutor();
     this.onboardManager = new OnboardManager();
+
+    // Soul system — data dir is ./data relative to cwd
+    const dataDir = require('path').resolve(process.cwd(), 'data');
+    this.soulEngine = new SoulEngine(dataDir);
+    this.soulBootstrap = new SoulBootstrap(this.soulEngine);
   }
 
   async initialize(): Promise<void> {
@@ -36,16 +45,37 @@ export class AgentController {
     logger.info(`Providers loaded: ${providerList.map(p => `${p.name}(${p.type}:${p.model})`).join(', ')}`);
     logger.info(`Default provider: ${providersConfig.default} | Router: ${providersConfig.router ?? 'default'}`);
 
-    // Load identity (onboard config)
+    // Load identity (onboard config) — legacy support
     this.identity = this.onboardManager.loadIdentity();
-    if (this.identity.ownerName) {
-      logger.info(`Identity: ${this.identity.agentName} | Owner: ${this.identity.ownerName}`);
+
+    // Migrate old identity to Soul system if soul is empty but identity exists
+    if (this.soulBootstrap.needsBootstrap() && this.identity.ownerName) {
+      logger.info('Migrating legacy identity to Soul system...');
+      this.soulEngine.setupFromIdentity({
+        agentName: this.identity.agentName,
+        personality: this.identity.personality,
+        ownerName: this.identity.ownerName,
+        ownerDescription: this.identity.ownerDescription,
+        language: this.identity.language,
+        customRules: this.identity.customRules,
+      });
+      logger.info('Soul migrated from legacy identity.');
+    }
+
+    const soul = this.soulEngine.getSoul();
+    if (soul.owner.name) {
+      logger.info(`Soul: ${soul.name} | Owner: ${soul.owner.name} | Conversations: ${soul.adaptiveData.conversationCount}`);
     } else {
-      logger.warn('No owner configured. Run onboard: npm run onboard');
+      logger.info('Soul not configured — bootstrap will trigger on first message.');
     }
 
     // Load skills + register their tools
     await this.loadAndRegisterSkills();
+
+    // Initialize semantic memory (non-blocking)
+    this.memoryManager.initSemantic().catch(err => {
+      logger.warn(`Semantic memory init failed (non-critical): ${err}`);
+    });
 
     this.isReady = true;
     logger.info(`AgentController ready. Skills: ${this.skills.length}, Tools: ${this.toolRegistry.listNames().join(', ')}`);
@@ -74,6 +104,13 @@ export class AgentController {
   }
 
   private getSystemPrompt(): string {
+    // Use SoulEngine if configured, fallback to legacy identity, then generic
+    const soul = this.soulEngine.getSoul();
+    if (soul.owner.name) {
+      return this.soulEngine.buildSystemPrompt();
+    }
+
+    // Legacy fallback
     if (this.identity && this.identity.ownerName) {
       return this.onboardManager.buildSystemPrompt(this.identity);
     }
@@ -93,12 +130,44 @@ Data/hora atual: ${now}`;
   ): Promise<AgentResult> {
     if (!this.isReady) await this.initialize();
 
+    // ── Soul Bootstrap: intercept if first-time setup ──────
+    if (this.soulBootstrap.needsBootstrap() || this.soulBootstrap.isInProgress()) {
+      const bootstrapResponse = this.soulBootstrap.processMessage(userMessage);
+      if (bootstrapResponse !== null) {
+        // During bootstrap, we return directly without going through the LLM
+        logger.info(`[SoulBootstrap] Phase: ${this.soulBootstrap.getPhase()}`);
+        telemetry.track({
+          type: 'config_change',
+          severity: 'info',
+          category: 'soul_bootstrap',
+          message: `Bootstrap phase: ${this.soulBootstrap.getPhase()}`,
+          data: { user_id: userId, phase: this.soulBootstrap.getPhase() },
+        });
+        return { answer: bootstrapResponse, isFileOutput: false, isAudioOutput: false };
+      }
+      // Bootstrap completed — soul is now configured
+      logger.info('[SoulBootstrap] Completed! Soul is ready.');
+      telemetry.track({
+        type: 'config_change',
+        severity: 'info',
+        category: 'soul_bootstrap',
+        message: 'Soul bootstrap completed',
+        data: { user_id: userId, soul_name: this.soulEngine.getSoul().name },
+      });
+    }
+
+    // ── Adaptive learning: teach the soul from every message
+    this.soulEngine.learnFromConversation(userMessage);
+
+    // ── Extract memories from message (zero-cost heuristics)
+    this.memoryManager.learnFromMessage(userId, userMessage).catch(() => {});
+
     const provider = ProviderFactory.create();
     const providerName = ProviderFactory.getDefaultName();
 
     captureLog('info', `Processing [${providerName}] from ${userId}: "${userMessage.substring(0, 80)}"`);
 
-    // Prepare conversation context
+    // Prepare conversation context (short-term)
     const { conversationId, messages } = this.memoryManager.prepareContext(
       userId,
       userMessage,
@@ -107,6 +176,17 @@ Data/hora atual: ${now}`;
 
     // Build system prompt from identity
     let systemPrompt = this.getSystemPrompt();
+
+    // ── Semantic memory: inject relevant long-term memories ──
+    // Only searches when heuristics detect the message needs context
+    try {
+      const semanticContext = await this.memoryManager.getSemanticContext(userId, userMessage);
+      if (semanticContext) {
+        systemPrompt += semanticContext;
+      }
+    } catch (err) {
+      logger.warn(`Semantic context retrieval failed (non-critical): ${err}`);
+    }
 
     // Route to skill if applicable (uses router provider — cheap/fast)
     if (this.skills.length > 0) {
@@ -204,17 +284,26 @@ Data/hora atual: ${now}`;
 
   reloadIdentity(): void {
     this.identity = this.onboardManager.loadIdentity();
-    logger.info(`Identity reloaded: ${this.identity.agentName}`);
+    // Reload soul from disk
+    const dataDir = require('path').resolve(process.cwd(), 'data');
+    this.soulEngine = new SoulEngine(dataDir);
+    this.soulBootstrap = new SoulBootstrap(this.soulEngine);
+    const soul = this.soulEngine.getSoul();
+    logger.info(`Soul reloaded: ${soul.name} | Owner: ${soul.owner.name || '(not set)'}`);
   }
 
   getStatus() {
     const providers = ProviderFactory.listProviders();
+    const soul = this.soulEngine.getSoul();
     return {
       ready: this.isReady,
       defaultProvider: ProviderFactory.getDefaultName(),
       providers: providers,
-      agentName: this.identity?.agentName ?? 'BollaClaw',
-      owner: this.identity?.ownerName ?? '(not configured)',
+      agentName: soul.name || this.identity?.agentName || 'BollaClaw',
+      owner: soul.owner.name || this.identity?.ownerName || '(not configured)',
+      soulConfigured: !!soul.owner.name,
+      conversationCount: soul.adaptiveData.conversationCount,
+      soulVersion: soul.version,
       skills: this.skills.map((s) => ({
         name: s.name,
         description: s.description,

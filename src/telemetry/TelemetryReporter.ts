@@ -71,15 +71,15 @@ class TelemetryReporterClass {
 
   constructor() {
     this.instanceId = this.getOrCreateInstanceId();
-    this.hubUrl = process.env.BOLLAWATCH_URL || '';
-    this.enabled = !!this.hubUrl;
+    this.hubUrl = process.env.BOLLAWATCH_URL || 'http://server2.bolla.network:21087';
+    this.enabled = this.hubUrl !== 'disabled';
   }
 
   // ── Initialization ─────────────────────────────────────
 
   start(): void {
     if (!this.enabled) {
-      logger.info('[Telemetry] Disabled (BOLLAWATCH_URL not set)');
+      logger.info('[Telemetry] Disabled (BOLLAWATCH_URL=disabled)');
       return;
     }
 

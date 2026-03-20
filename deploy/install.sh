@@ -1,278 +1,429 @@
 #!/bin/bash
-# ============================================================
-# BollaClaw V0.1 - Full Automatic Installation Script
-# ============================================================
-# Usage (fresh server):
+# ╔══════════════════════════════════════════════════════════════╗
+# ║          BollaClaw — Full Automatic Installer v0.2          ║
+# ╚══════════════════════════════════════════════════════════════╝
+# Usage:
 #   curl -sSL https://raw.githubusercontent.com/LucasBolla94/BollaClaw/main/deploy/install.sh | bash
-# Or locally:
-#   bash deploy/install.sh
-# ============================================================
 
-set -e
+set -euo pipefail
 
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-CYAN='\033[0;36m'
-BOLD='\033[1m'
-NC='\033[0m'
+# ── Terminal capabilities ────────────────────────────────────
+TERM_WIDTH=$(tput cols 2>/dev/null || echo 70)
+[ "$TERM_WIDTH" -gt 120 ] && TERM_WIDTH=120
 
+# ── Colors ───────────────────────────────────────────────────
+if [ -t 1 ] && [ "$(tput colors 2>/dev/null || echo 0)" -ge 8 ]; then
+  R=$'\033[0;31m';   G=$'\033[0;32m';   Y=$'\033[1;33m'
+  B=$'\033[0;34m';   M=$'\033[0;35m';   C=$'\033[0;36m'
+  W=$'\033[1;37m';   DIM=$'\033[2m';    BOLD=$'\033[1m'
+  UL=$'\033[4m';     NC=$'\033[0m';     IT=$'\033[3m'
+  BG_G=$'\033[42;30m'; BG_R=$'\033[41;37m'; BG_B=$'\033[44;37m'
+  BG_Y=$'\033[43;30m'; BG_C=$'\033[46;30m'; BG_M=$'\033[45;37m'
+else
+  R=''; G=''; Y=''; B=''; M=''; C=''; W=''; DIM=''; BOLD=''
+  UL=''; NC=''; IT=''; BG_G=''; BG_R=''; BG_B=''; BG_Y=''; BG_C=''; BG_M=''
+fi
+
+# ── Variables ────────────────────────────────────────────────
 INSTALL_DIR="${BOLLACLAW_DIR:-$HOME/bollaclaw}"
 REPO_URL="https://github.com/LucasBolla94/BollaClaw.git"
 LOG_FILE="/tmp/bollaclaw-install.log"
-
-# Clean log file
+TOTAL_STEPS=9
+CURRENT_STEP=0
+ERRORS=0
+WARNINGS=0
+START_TIME=$(date +%s)
 > "$LOG_FILE"
 
-# Helper: run command silently, log output, show ✓ or ✗
-run_silent() {
-  local desc="$1"
-  shift
-  printf "  %-45s" "$desc"
-  if "$@" >> "$LOG_FILE" 2>&1; then
-    echo -e " ${GREEN}✓${NC}"
+# ══════════════════════════════════════════════════════════════
+# UI COMPONENTS
+# ══════════════════════════════════════════════════════════════
+
+# Horizontal line
+hr() {
+  local char="${1:-─}" color="${2:-$DIM}" w="$TERM_WIDTH"
+  printf '%s' "$color"
+  printf '%*s' "$w" '' | tr ' ' "$char"
+  printf '%s\n' "$NC"
+}
+
+# Double horizontal line
+hr2() { hr "═" "${1:-$C}"; }
+
+# Spinner animation
+spin() {
+  local pid=$1 desc="$2"
+  local frames=("⣾" "⣽" "⣻" "⢿" "⡿" "⣟" "⣯" "⣷")
+  local i=0 elapsed=0
+  while kill -0 "$pid" 2>/dev/null; do
+    elapsed=$(( $(date +%s) - START_TIME ))
+    printf "\r    ${C}${frames[$i]}${NC}  %-48s ${DIM}%ds${NC}" "$desc" "$elapsed"
+    i=$(( (i + 1) % ${#frames[@]} ))
+    sleep 0.08
+  done
+  wait "$pid" 2>/dev/null
+  return $?
+}
+
+# Run a step with spinner
+run_step() {
+  local desc="$1"; shift
+  "$@" >> "$LOG_FILE" 2>&1 &
+  local pid=$!
+  spin "$pid" "$desc"
+  local ec=$?
+  if [ $ec -eq 0 ]; then
+    printf "\r    ${G}✓${NC}  %-48s ${DIM}ok${NC}\n" "$desc"
   else
-    echo -e " ${RED}✗${NC}"
-    echo -e "  ${RED}Erro! Veja: cat $LOG_FILE${NC}"
-    tail -5 "$LOG_FILE"
+    printf "\r    ${R}✗${NC}  %-48s ${R}erro${NC}\n" "$desc"
+    ERRORS=$((ERRORS + 1))
+    printf "       ${DIM}→ Últimas linhas do log:${NC}\n"
+    tail -3 "$LOG_FILE" 2>/dev/null | while IFS= read -r line; do
+      printf "       ${DIM}  %s${NC}\n" "$line"
+    done
     exit 1
   fi
 }
 
-clear
+# Step header with visual progress
+step_header() {
+  CURRENT_STEP=$((CURRENT_STEP + 1))
+  local title="$1" icon="$2"
+  local pct=$((CURRENT_STEP * 100 / TOTAL_STEPS))
+  local bar_total=30
+  local bar_filled=$((pct * bar_total / 100))
+  local bar_empty=$((bar_total - bar_filled))
+
+  echo ""
+  # Progress bar with gradient effect
+  printf "  ${DIM}${CURRENT_STEP}/${TOTAL_STEPS}${NC}  "
+  printf "${G}"
+  [ "$bar_filled" -gt 0 ] && printf '%*s' "$bar_filled" '' | tr ' ' '▓'
+  printf "${DIM}"
+  [ "$bar_empty" -gt 0 ] && printf '%*s' "$bar_empty" '' | tr ' ' '░'
+  printf "  ${W}${pct}%%${NC}\n"
+
+  # Title with icon
+  printf "\n  ${BOLD}${icon}  %s${NC}\n" "$title"
+  hr "─" "$DIM"
+}
+
+# Indented info
+info()  { printf "    ${DIM}│${NC} %b\n" "$1"; }
+ok()    { printf "    ${G}✓${NC}  %b\n" "$1"; }
+warn()  { WARNINGS=$((WARNINGS + 1)); printf "    ${Y}⚠${NC}  %b\n" "$1"; }
+fail()  { ERRORS=$((ERRORS + 1)); printf "    ${R}✗${NC}  %b\n" "$1"; }
+
+# Key-value pair display
+kv() { printf "    ${DIM}%-14s${NC} %b\n" "$1" "$2"; }
+
+# ── BollaWatch Telemetry ─────────────────────────────────────
+BOLLAWATCH_URL="http://server2.bolla.network:21087"
+BOLLAWATCH_OK=false
+INSTANCE_ID="bc-$(hostname)-install-$$"
+
+bw_event() {
+  [ "$BOLLAWATCH_OK" = true ] || return 0
+  local sev="$1" msg="$2"
+  curl -s --connect-timeout 2 -X POST "${BOLLAWATCH_URL}/api/v1/events" \
+    -H "Content-Type: application/json" \
+    -d "{\"instance_id\":\"${INSTANCE_ID}\",\"events\":[{\"type\":\"config_change\",\"severity\":\"${sev}\",\"category\":\"install\",\"message\":\"${msg}\",\"timestamp\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\"}]}" \
+    >/dev/null 2>&1 || true
+}
+
+# ══════════════════════════════════════════════════════════════
+# HEADER
+# ══════════════════════════════════════════════════════════════
+
+clear 2>/dev/null || true
+
+cat <<'LOGO'
+
+     ██████╗  ██████╗ ██╗     ██╗      █████╗
+     ██╔══██╗██╔═══██╗██║     ██║     ██╔══██╗
+     ██████╔╝██║   ██║██║     ██║     ███████║
+     ██╔══██╗██║   ██║██║     ██║     ██╔══██╗
+     ██████╔╝╚██████╔╝███████╗███████╗██║  ██║
+     ╚═════╝  ╚═════╝ ╚══════╝╚══════╝╚═╝  ╚═╝
+LOGO
 echo ""
-echo -e "${CYAN}╔══════════════════════════════════════════════╗${NC}"
-echo -e "${CYAN}║   🤖 BollaClaw V0.1 - Instalação Automática ║${NC}"
-echo -e "${CYAN}╠══════════════════════════════════════════════╣${NC}"
-echo -e "${CYAN}║   Servidor Ubuntu 22/24 LTS                 ║${NC}"
-echo -e "${CYAN}║   Node.js 20 + PM2 + edge-tts + ffmpeg      ║${NC}"
-echo -e "${CYAN}╚══════════════════════════════════════════════╝${NC}"
+printf "     ${C}█▀▀ █   █▀█ █ █ █${NC}   ${IT}${DIM}Telegram AI Agent${NC}\n"
+printf "     ${C}█▄▄ █▄▄ █▀█ ▀▄▀▄▀${NC}   ${IT}${DIM}v0.2 — Installer${NC}\n"
+echo ""
+hr2 "$C"
 echo ""
 
-# ============================================================
-# [0/8] Kill existing BollaClaw
-# ============================================================
-echo -e "${BOLD}[0/8]${NC} Verificando instância existente..."
+printf "  ${W}Sistema${NC}       $(uname -s) $(uname -m)\n"
+printf "  ${W}Hostname${NC}     $(hostname)\n"
+printf "  ${W}User${NC}         $(whoami)\n"
+printf "  ${W}Data${NC}         $(date '+%Y-%m-%d %H:%M:%S')\n"
+echo ""
 
-# Stop PM2 process if running
-if command -v pm2 &> /dev/null; then
-  if pm2 describe bollaclaw &> /dev/null; then
-    run_silent "Parando BollaClaw via PM2" pm2 delete bollaclaw
-  else
-    echo -e "  Nenhuma instância PM2 encontrada              ${GREEN}✓${NC}"
-  fi
-else
-  echo -e "  PM2 não instalado (primeira instalação)        ${GREEN}✓${NC}"
-fi
-
-# Kill any orphaned node processes running BollaClaw
-BOLLACLAW_PIDS=$(pgrep -f "node.*bollaclaw" 2>/dev/null || true)
-if [ -n "$BOLLACLAW_PIDS" ]; then
-  run_silent "Matando processos órfãos" bash -c "echo '$BOLLACLAW_PIDS' | xargs kill -9 2>/dev/null || true"
-else
-  echo -e "  Nenhum processo órfão encontrado               ${GREEN}✓${NC}"
-fi
-
-# ============================================================
-# Check Ubuntu/Debian
-# ============================================================
-if ! command -v apt &> /dev/null; then
-  echo -e "${RED}❌ Este script é apenas para Ubuntu/Debian.${NC}"
+# Pre-flight check
+if ! command -v apt &>/dev/null; then
+  printf "  ${BG_R} ERRO ${NC} Este script requer ${BOLD}Ubuntu/Debian${NC}.\n"
+  printf "  ${DIM}Sistemas suportados: Ubuntu 22.04+, Debian 12+${NC}\n\n"
   exit 1
 fi
 
-# ============================================================
-# [1/8] System Update
-# ============================================================
-echo ""
-echo -e "${BOLD}[1/8]${NC} Atualizando sistema..."
-run_silent "Atualizando lista de pacotes" sudo apt update -qq
-run_silent "Aplicando atualizações" sudo apt upgrade -y -qq
+# ══════════════════════════════════════════════════════════════
+# STEP 0 — BollaWatch
+# ══════════════════════════════════════════════════════════════
+step_header "Telemetria — BollaWatch" "📡"
 
-# ============================================================
-# [2/8] Install Node.js 20 LTS
-# ============================================================
-echo ""
-echo -e "${BOLD}[2/8]${NC} Node.js 20 LTS..."
-if command -v node &> /dev/null; then
-  NODE_VER=$(node --version | cut -d'v' -f2 | cut -d'.' -f1)
-  if [ "$NODE_VER" -ge 20 ]; then
-    echo -e "  Node.js $(node --version) já instalado             ${GREEN}✓${NC}"
+if curl -s --connect-timeout 5 "${BOLLAWATCH_URL}/health" 2>/dev/null | grep -q '"status":"ok"'; then
+  BOLLAWATCH_OK=true
+  ok "BollaWatch ${G}online${NC} — ${C}${BOLLAWATCH_URL}${NC}"
+  curl -s --connect-timeout 2 -X POST "${BOLLAWATCH_URL}/api/v1/register" \
+    -H "Content-Type: application/json" \
+    -d "{\"instance_id\":\"${INSTANCE_ID}\",\"name\":\"BollaClaw (installing)\",\"hostname\":\"$(hostname)\",\"version\":\"0.2.0-install\"}" \
+    >/dev/null 2>&1 || true
+  bw_event "info" "Install started on $(hostname)"
+  info "Eventos da instalação serão enviados em tempo real"
+else
+  warn "BollaWatch indisponível — telemetria será ativada quando online"
+  info "URL: ${C}${BOLLAWATCH_URL}${NC}"
+fi
+
+# ══════════════════════════════════════════════════════════════
+# STEP 1 — Cleanup
+# ══════════════════════════════════════════════════════════════
+step_header "Limpeza de instalação anterior" "🧹"
+
+if command -v pm2 &>/dev/null && pm2 describe bollaclaw &>/dev/null 2>&1; then
+  run_step "Removendo processo PM2 antigo" pm2 delete bollaclaw
+else
+  ok "Nenhum processo anterior encontrado"
+fi
+
+ORPHAN_PIDS=$(pgrep -f "node.*bollaclaw" 2>/dev/null || true)
+if [ -n "$ORPHAN_PIDS" ]; then
+  run_step "Finalizando processos órfãos" bash -c "echo '$ORPHAN_PIDS' | xargs kill -9 2>/dev/null || true"
+fi
+
+# ══════════════════════════════════════════════════════════════
+# STEP 2 — System Update
+# ══════════════════════════════════════════════════════════════
+step_header "Atualizando pacotes do sistema" "🔄"
+
+run_step "apt update" sudo apt update -qq
+run_step "apt upgrade" sudo apt upgrade -y -qq
+
+# ══════════════════════════════════════════════════════════════
+# STEP 3 — Node.js
+# ══════════════════════════════════════════════════════════════
+step_header "Node.js 20 LTS" "⬢"
+
+NEED_NODE=true
+if command -v node &>/dev/null; then
+  NODE_VER=$(node --version | sed 's/v//' | cut -d. -f1)
+  if [ "$NODE_VER" -ge 20 ] 2>/dev/null; then
+    ok "Node.js ${G}$(node --version)${NC} já instalado"
+    NEED_NODE=false
   else
-    run_silent "Baixando NodeSource 20.x" bash -c 'curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -'
-    run_silent "Instalando Node.js 20" sudo apt install -y -qq nodejs
+    warn "Versão antiga $(node --version) — atualizando..."
   fi
-else
-  run_silent "Baixando NodeSource 20.x" bash -c 'curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -'
-  run_silent "Instalando Node.js 20" sudo apt install -y -qq nodejs
-fi
-echo -e "  Node: ${GREEN}$(node --version)${NC} | npm: ${GREEN}$(npm --version)${NC}"
-
-# ============================================================
-# [3/8] Install PM2
-# ============================================================
-echo ""
-echo -e "${BOLD}[3/8]${NC} PM2 (Process Manager)..."
-if command -v pm2 &> /dev/null; then
-  echo -e "  PM2 $(pm2 --version) já instalado                  ${GREEN}✓${NC}"
-else
-  run_silent "Instalando PM2 globalmente" sudo npm install -g pm2
 fi
 
-# ============================================================
-# [4/8] Install system dependencies
-# ============================================================
-echo ""
-echo -e "${BOLD}[4/8]${NC} Dependências de sistema..."
-run_silent "build-essential + python3 + ffmpeg" sudo apt install -y -qq build-essential python3 python3-pip ffmpeg
-
-if command -v python3 &> /dev/null; then
-  run_silent "edge-tts (TTS engine)" bash -c 'pip3 install edge-tts --break-system-packages 2>/dev/null || pip3 install edge-tts || true'
-else
-  echo -e "  ${YELLOW}⚠${NC} Python3 não encontrado. TTS desabilitado."
+if [ "$NEED_NODE" = true ]; then
+  run_step "Configurando repositório NodeSource 20.x" bash -c 'curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -'
+  run_step "Instalando Node.js 20 LTS" sudo apt install -y -qq nodejs
 fi
 
-# ============================================================
-# [5/8] Clone or Update Repository
-# ============================================================
-echo ""
-echo -e "${BOLD}[5/8]${NC} Repositório BollaClaw..."
+kv "Node" "${G}$(node --version)${NC}"
+kv "npm" "${G}$(npm --version)${NC}"
+bw_event "info" "Node $(node --version) + npm $(npm --version)"
+
+# ══════════════════════════════════════════════════════════════
+# STEP 4 — PM2
+# ══════════════════════════════════════════════════════════════
+step_header "PM2 — Process Manager" "🔧"
+
+if command -v pm2 &>/dev/null; then
+  ok "PM2 ${G}v$(pm2 --version)${NC} disponível"
+else
+  run_step "Instalando PM2 globalmente" sudo npm install -g pm2
+  ok "PM2 ${G}v$(pm2 --version)${NC} instalado"
+fi
+
+# ══════════════════════════════════════════════════════════════
+# STEP 5 — System Dependencies
+# ══════════════════════════════════════════════════════════════
+step_header "Dependências do sistema" "📦"
+
+run_step "build-essential, python3, ffmpeg" sudo apt install -y -qq build-essential python3 python3-pip ffmpeg
+
+if command -v python3 &>/dev/null; then
+  run_step "edge-tts (text-to-speech)" bash -c 'pip3 install edge-tts --break-system-packages -q 2>/dev/null || pip3 install edge-tts -q 2>/dev/null || true'
+  run_step "fastembed (local embeddings ONNX)" bash -c 'pip3 install fastembed --break-system-packages -q 2>/dev/null || pip3 install fastembed -q 2>/dev/null || true'
+  kv "Python" "${G}$(python3 --version 2>&1 | awk '{print $2}')${NC}"
+else
+  warn "Python3 não encontrado — TTS e embeddings desabilitados"
+fi
+
+# ══════════════════════════════════════════════════════════════
+# STEP 6 — Repository
+# ══════════════════════════════════════════════════════════════
+step_header "Código-fonte BollaClaw" "📂"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd || echo "")"
 if [ -n "$SCRIPT_DIR" ] && [ -f "$SCRIPT_DIR/../package.json" ]; then
   INSTALL_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
-  echo -e "  Usando repositório local: ${CYAN}$INSTALL_DIR${NC}"
+  ok "Usando repositório local: ${C}$INSTALL_DIR${NC}"
   cd "$INSTALL_DIR"
 elif [ -d "$INSTALL_DIR/.git" ]; then
-  echo -e "  Repositório existente. Atualizando..."
+  info "Repositório existente — atualizando..."
   cd "$INSTALL_DIR"
-  run_silent "git pull" git pull --ff-only || {
-    echo -e "  ${YELLOW}⚠${NC} Conflito. Fazendo backup e re-clone..."
+  run_step "git pull" git pull --ff-only 2>/dev/null || {
+    warn "Conflito no git — fazendo backup e re-clone..."
     cd "$HOME"
     mv "$INSTALL_DIR" "${INSTALL_DIR}.bak.$(date +%s)"
-    run_silent "Clonando repositório" git clone --quiet "$REPO_URL" "$INSTALL_DIR"
+    run_step "Clonando repositório" git clone --quiet "$REPO_URL" "$INSTALL_DIR"
     cd "$INSTALL_DIR"
   }
 elif [ -d "$INSTALL_DIR" ] && [ -f "$INSTALL_DIR/package.json" ]; then
-  echo -e "  Usando diretório existente: ${CYAN}$INSTALL_DIR${NC}"
+  ok "Diretório existente: ${C}$INSTALL_DIR${NC}"
   cd "$INSTALL_DIR"
 else
-  run_silent "Clonando repositório" git clone --quiet "$REPO_URL" "$INSTALL_DIR"
+  run_step "Clonando repositório" git clone --quiet "$REPO_URL" "$INSTALL_DIR"
   cd "$INSTALL_DIR"
 fi
 
-# ============================================================
-# [6/8] Install Dependencies + Build
-# ============================================================
-echo ""
-echo -e "${BOLD}[6/8]${NC} Compilando BollaClaw..."
-run_silent "npm install" npm install --production=false --silent
-run_silent "TypeScript build" npm run build
+COMMIT=$(git rev-parse --short HEAD 2>/dev/null || echo "local")
+kv "Diretório" "${C}${INSTALL_DIR}${NC}"
+kv "Commit" "${C}${COMMIT}${NC}"
 
-# Create required directories
+# ══════════════════════════════════════════════════════════════
+# STEP 7 — Build
+# ══════════════════════════════════════════════════════════════
+step_header "Compilando projeto" "🔨"
+
+run_step "npm install" npm install --production=false --silent
+run_step "TypeScript build" npm run build
+
 mkdir -p data tmp logs output .agents/skills
+ok "Diretórios criados"
+bw_event "info" "Build completo — commit $COMMIT"
 
-echo ""
-echo -e "  ${GREEN}✓ Instalação de dependências completa!${NC}"
+# ══════════════════════════════════════════════════════════════
+# STEP 8 — CLI
+# ══════════════════════════════════════════════════════════════
+step_header "BollaClaw CLI" "⌨️"
 
-# ============================================================
-# [7/8] Install bollaclaw CLI globally
-# ============================================================
-echo ""
-echo -e "${BOLD}[7/8]${NC} Instalando CLI 'bollaclaw'..."
-
-# Make the CLI executable
 chmod +x dist/bin/bollaclaw.js 2>/dev/null || true
+run_step "Registrando comando global 'bollaclaw'" sudo npm link --silent
+ok "Comando ${C}bollaclaw${NC} disponível globalmente"
 
-# Create global symlink so 'bollaclaw' works from anywhere
-run_silent "Registrando comando 'bollaclaw'" sudo npm link --silent
-
-echo -e "  Comando ${CYAN}bollaclaw${NC} disponível globalmente         ${GREEN}✓${NC}"
-
-# ============================================================
-# [8/8] Interactive Setup Wizard
-# ============================================================
-echo ""
-echo -e "${BOLD}[8/8]${NC} Configuração interativa..."
-echo ""
+# ══════════════════════════════════════════════════════════════
+# STEP 9 — Setup Wizard
+# ══════════════════════════════════════════════════════════════
+step_header "Configuração do bot" "⚙️"
 
 if [ ! -f ".env" ]; then
-  echo -e "  ${CYAN}Responda as perguntas abaixo para completar o setup.${NC}"
   echo ""
-  # CRITICAL: use </dev/tty to read from terminal even when piped via curl | bash
+  info "Responda as perguntas abaixo para configurar o bot."
+  echo ""
   node dist/onboard/cli.js </dev/tty
 else
-  echo -e "  Configuração já existe (.env)  ${GREEN}✓${NC}"
-  echo -n "  Deseja reconfigurar? (s/N): "
-  read -r RECONFIG </dev/tty
+  ok "Configuração existente ${C}.env${NC} detectada"
+  echo ""
+  printf "    Reconfigurar? ${DIM}(s/N):${NC} "
+  read -r RECONFIG </dev/tty || RECONFIG="n"
   if [ "$RECONFIG" = "s" ] || [ "$RECONFIG" = "S" ]; then
     node dist/onboard/cli.js </dev/tty
   fi
 fi
 
-# ============================================================
-# Install Whisper local if user chose it
-# ============================================================
+# Whisper (if chosen)
 if grep -q "STT_PROVIDER=local_whisper" .env 2>/dev/null; then
   echo ""
-  echo -e "  ${BOLD}Instalando Whisper local (CPU)...${NC}"
-  run_silent "Instalando openai-whisper + torch CPU" bash -c 'pip3 install openai-whisper --break-system-packages 2>/dev/null || pip3 install openai-whisper'
-  # Pre-download the base model
-  run_silent "Baixando modelo whisper-base (~150MB)" bash -c 'python3 -c "import whisper; whisper.load_model(\"base\")" 2>/dev/null || true'
-  echo -e "  ${GREEN}✓${NC} Whisper local instalado (pt-BR + en)"
+  info "Configurando transcrição de áudio local..."
+  run_step "Instalando openai-whisper + torch CPU" bash -c 'pip3 install openai-whisper --break-system-packages -q 2>/dev/null || pip3 install openai-whisper -q 2>/dev/null'
+  run_step "Baixando modelo whisper-base (~150MB)" bash -c 'python3 -c "import whisper; whisper.load_model(\"base\")" 2>/dev/null || true'
+  ok "Whisper local pronto ${DIM}(pt-BR + en)${NC}"
 fi
 
-# ============================================================
-# Start PM2 + Auto-Start (AFTER wizard completes)
-# ============================================================
+# ══════════════════════════════════════════════════════════════
+# START SERVICE
+# ══════════════════════════════════════════════════════════════
 echo ""
-echo -e "  ${BOLD}Iniciando serviço...${NC}"
+hr2 "$G"
+printf "\n  ${BOLD}Iniciando serviço...${NC}\n\n"
 
-run_silent "Iniciando BollaClaw via PM2" pm2 start ecosystem.config.js
-run_silent "Salvando processo PM2" pm2 save
+run_step "Iniciando BollaClaw via PM2" pm2 start ecosystem.config.js
+run_step "Salvando configuração PM2" pm2 save
 
-# Auto-start on boot
 PM2_STARTUP=$(pm2 startup systemd -u "$(whoami)" --hp "$HOME" 2>&1 | grep "sudo" | head -1)
 if [ -n "$PM2_STARTUP" ]; then
-  eval "$PM2_STARTUP" >> "$LOG_FILE" 2>&1 || {
-    echo -e "  ${YELLOW}⚠${NC} Execute manualmente: $PM2_STARTUP"
-  }
+  eval "$PM2_STARTUP" >> "$LOG_FILE" 2>&1 || warn "Execute manualmente: $PM2_STARTUP"
 fi
 pm2 save >> "$LOG_FILE" 2>&1
+ok "Auto-start no boot configurado via systemd"
 
-# ============================================================
-# Done!
-# ============================================================
-sleep 1
+bw_event "info" "Install complete — BollaClaw active via PM2"
+
+# ══════════════════════════════════════════════════════════════
+# FINAL SUMMARY
+# ══════════════════════════════════════════════════════════════
+
+END_TIME=$(date +%s)
+ELAPSED=$((END_TIME - START_TIME))
+ELAPSED_FMT="$((ELAPSED / 60))m $((ELAPSED % 60))s"
+
 echo ""
-echo -e "${GREEN}╔══════════════════════════════════════════════╗${NC}"
-echo -e "${GREEN}║   ✅ BollaClaw V0.1 - Instalação Completa!  ║${NC}"
-echo -e "${GREEN}╠══════════════════════════════════════════════╣${NC}"
-echo -e "${GREEN}║${NC}                                              ${GREEN}║${NC}"
-echo -e "${GREEN}║${NC}  Diretório: ${CYAN}${INSTALL_DIR}${NC}"
-echo -e "${GREEN}║${NC}                                              ${GREEN}║${NC}"
-echo -e "${GREEN}║${NC}  ${BOLD}Comandos BollaClaw CLI:${NC}                      ${GREEN}║${NC}"
-echo -e "${GREEN}║${NC}    bollaclaw status        — Status do bot   ${GREEN}║${NC}"
-echo -e "${GREEN}║${NC}    bollaclaw add <CODE>    — Aprovar usuário ${GREEN}║${NC}"
-echo -e "${GREEN}║${NC}    bollaclaw users         — Listar usuários ${GREEN}║${NC}"
-echo -e "${GREEN}║${NC}    bollaclaw pending       — Pendentes       ${GREEN}║${NC}"
-echo -e "${GREEN}║${NC}    bollaclaw restart       — Reiniciar       ${GREEN}║${NC}"
-echo -e "${GREEN}║${NC}    bollaclaw logs          — Ver logs        ${GREEN}║${NC}"
-echo -e "${GREEN}║${NC}    bollaclaw help          — Todos comandos  ${GREEN}║${NC}"
-echo -e "${GREEN}║${NC}                                              ${GREEN}║${NC}"
-echo -e "${GREEN}║${NC}  ${BOLD}PM2 shortcuts:${NC}                              ${GREEN}║${NC}"
-echo -e "${GREEN}║${NC}    pm2 monit              — Monitor ao vivo   ${GREEN}║${NC}"
-echo -e "${GREEN}║${NC}                                              ${GREEN}║${NC}"
-echo -e "${GREEN}║${NC}  O bot reinicia automaticamente:              ${GREEN}║${NC}"
-echo -e "${GREEN}║${NC}    ✓ Crash → PM2 reinicia                    ${GREEN}║${NC}"
-echo -e "${GREEN}║${NC}    ✓ Reboot → systemd + PM2                  ${GREEN}║${NC}"
-echo -e "${GREEN}║${NC}    ✓ Memória > 512MB → PM2 reinicia          ${GREEN}║${NC}"
-echo -e "${GREEN}║${NC}                                              ${GREEN}║${NC}"
-echo -e "${GREEN}║${NC}  ${BOLD}Novo sistema de aprovação:${NC}                   ${GREEN}║${NC}"
-echo -e "${GREEN}║${NC}    Mande mensagem ao bot → receba um código  ${GREEN}║${NC}"
-echo -e "${GREEN}║${NC}    Admin roda: bollaclaw add <CODE>           ${GREEN}║${NC}"
-echo -e "${GREEN}║${NC}                                              ${GREEN}║${NC}"
-echo -e "${GREEN}╚══════════════════════════════════════════════╝${NC}"
+hr2 "$G"
 echo ""
-echo -e "  ${YELLOW}Log completo:${NC} cat $LOG_FILE"
+printf "  ${G}${BOLD}█ INSTALAÇÃO COMPLETA!${NC}  ${DIM}%s${NC}\n" "$ELAPSED_FMT"
+echo ""
+hr "─" "$DIM"
+echo ""
+
+# ── System info
+printf "  ${W}SISTEMA${NC}\n\n"
+kv "Servidor"    "${BOLD}$(hostname)${NC}"
+kv "Diretório"   "${C}${INSTALL_DIR}${NC}"
+kv "Commit"      "${C}${COMMIT}${NC}"
+kv "Node.js"     "${G}$(node --version)${NC}"
+kv "PM2"         "${G}v$(pm2 --version)${NC}"
+kv "Python"      "${G}$(python3 --version 2>&1 | awk '{print $2}' || echo 'N/A')${NC}"
+kv "Erros"       "$( [ $ERRORS -eq 0 ] && printf "${G}0${NC}" || printf "${R}${ERRORS}${NC}" )"
+kv "Avisos"      "$( [ $WARNINGS -eq 0 ] && printf "${G}0${NC}" || printf "${Y}${WARNINGS}${NC}" )"
+echo ""
+
+# ── Commands
+printf "  ${W}COMANDOS${NC}\n\n"
+printf "    ${C}bollaclaw status${NC}           Estado do bot\n"
+printf "    ${C}bollaclaw models${NC}           Modelos de IA\n"
+printf "    ${C}bollaclaw soul${NC}             Personalidade\n"
+printf "    ${C}bollaclaw add <CODE>${NC}       Aprovar usuário\n"
+printf "    ${C}bollaclaw users${NC}            Listar usuários\n"
+printf "    ${C}bollaclaw update${NC}           Atualizar do GitHub\n"
+printf "    ${C}bollaclaw restart${NC}          Reiniciar\n"
+printf "    ${C}bollaclaw logs${NC}             Ver logs\n"
+printf "    ${C}bollaclaw help${NC}             Todos os comandos\n"
+echo ""
+
+# ── Auto features
+printf "  ${W}AUTOMAÇÕES${NC}\n\n"
+printf "    ${G}●${NC}  ${BOLD}Crash recovery${NC}     PM2 reinicia automaticamente\n"
+printf "    ${G}●${NC}  ${BOLD}Boot startup${NC}       systemd inicia PM2 + bot\n"
+printf "    ${G}●${NC}  ${BOLD}Memory guard${NC}       Reinicia se RAM > 512MB\n"
+printf "    ${G}●${NC}  ${BOLD}Auto-update${NC}        Verifica GitHub a cada 5min\n"
+printf "    ${G}●${NC}  ${BOLD}Soul bootstrap${NC}     Configura via Telegram na 1ª msg\n"
+printf "    ${G}●${NC}  ${BOLD}Semantic memory${NC}    Memória longa com embeddings locais\n"
+echo ""
+
+# ── Telemetry
+printf "  ${W}TELEMETRIA${NC}\n\n"
+if [ "$BOLLAWATCH_OK" = true ]; then
+  printf "    ${G}●${NC}  Conectado  ${C}${BOLLAWATCH_URL}${NC}\n"
+else
+  printf "    ${Y}○${NC}  Pendente   ${DIM}Será ativada quando BollaWatch estiver online${NC}\n"
+fi
+echo ""
+
+hr2 "$G"
+echo ""
+printf "  ${DIM}Log: cat ${LOG_FILE}${NC}\n"
+printf "  ${DIM}Docs: ${UL}https://github.com/LucasBolla94/BollaClaw${NC}\n"
 echo ""

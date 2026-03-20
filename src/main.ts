@@ -3,6 +3,7 @@ import * as fs from 'fs';
 import { TelegramInputHandler } from './bot/TelegramInputHandler';
 import { startAdminServer } from './admin/AdminServer';
 import { OnboardManager } from './onboard/OnboardManager';
+import { AutoUpdater } from './updater/AutoUpdater';
 import { config } from './utils/config';
 import { logger, captureLog } from './utils/logger';
 import { telemetry } from './telemetry/TelemetryReporter';
@@ -35,6 +36,18 @@ async function main() {
 
   // Start telemetry reporter
   telemetry.start();
+
+  // Start auto-updater
+  const updateInterval = parseInt(process.env.AUTO_UPDATE_INTERVAL || '300000', 10); // 5min default
+  const autoUpdateEnabled = process.env.AUTO_UPDATE !== 'disabled';
+  const updater = new AutoUpdater({
+    enabled: autoUpdateEnabled,
+    checkIntervalMs: updateInterval,
+    branch: process.env.AUTO_UPDATE_BRANCH || 'main',
+    repoDir: process.cwd(),
+    pm2Name: process.env.PM2_NAME || 'bollaclaw',
+  });
+  updater.start();
 
   const bot = new TelegramInputHandler();
 
