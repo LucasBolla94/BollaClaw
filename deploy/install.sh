@@ -426,6 +426,21 @@ step_header "Compilando projeto" "🔨"
 run_step "npm install" npm install --production=false --silent
 run_step "TypeScript build" npm run build
 
+# ── Build verification ──────────────────────────────────────
+if [ ! -f "dist/main.js" ]; then
+  fail "Build falhou: dist/main.js não encontrado"
+  bw_event "error" "Build verification failed — dist/main.js missing"
+  exit 1
+fi
+
+MAIN_SIZE=$(stat -c%s "dist/main.js" 2>/dev/null || stat -f%z "dist/main.js" 2>/dev/null || echo "0")
+if [ "$MAIN_SIZE" -lt 100 ]; then
+  fail "Build suspeito: dist/main.js muito pequeno (${MAIN_SIZE} bytes)"
+  bw_event "error" "Build verification failed — main.js too small"
+  exit 1
+fi
+ok "Build verificado (dist/main.js = ${MAIN_SIZE} bytes)"
+
 mkdir -p data tmp logs output .agents/skills
 ok "Diretórios criados"
 bw_event "info" "Build completo — commit $COMMIT"
@@ -505,6 +520,23 @@ echo ""
 hr2 "$G"
 printf "\n  ${BOLD}Iniciando serviço...${NC}\n\n"
 
+# ── .env validation before PM2 start ───────────────────────
+if [ ! -f ".env" ]; then
+  fail ".env não encontrado! Configure antes de iniciar."
+  bw_event "error" "PM2 start aborted — .env missing"
+  exit 1
+fi
+
+# Check critical env vars
+MISSING_VARS=""
+if ! grep -q "TELEGRAM_BOT_TOKEN" .env 2>/dev/null; then
+  MISSING_VARS="${MISSING_VARS} TELEGRAM_BOT_TOKEN"
+fi
+if [ -n "$MISSING_VARS" ]; then
+  warn "Variáveis faltando no .env:${MISSING_VARS}"
+  warn "O bot pode não iniciar corretamente. Execute: bollaclaw onboard"
+fi
+
 run_step "Iniciando BollaClaw via PM2" pm2 start ecosystem.config.js
 run_step "Salvando configuração PM2" pm2 save
 
@@ -519,7 +551,43 @@ fi
 pm2 save >> "$LOG_FILE" 2>&1
 ok "Auto-start no boot configurado via systemd"
 
-bw_event "info" "Install complete — BollaClaw active via PM2"
+# ── Post-start health check ────────────────────────────────
+echo ""
+info "Verificando saúde do bot..."
+sleep 4
+
+PM2_STATUS=$(pm2 jlist 2>/dev/null || echo "[]")
+BC_STATUS=$(echo "$PM2_STATUS" | python3 -c "
+import sys, json
+try:
+    procs = json.load(sys.stdin)
+    for p in procs:
+        if p.get('name') == 'bollaclaw':
+            print(p.get('pm2_env', {}).get('status', 'unknown'))
+            sys.exit(0)
+    print('not_found')
+except: print('error')
+" 2>/dev/null || echo "unknown")
+
+case "$BC_STATUS" in
+  online)
+    ok "Bot iniciado com sucesso! Status: ${G}online${NC}"
+    ;;
+  errored)
+    warn "Bot falhou ao iniciar (status: errored)"
+    warn "Verifique os logs: pm2 logs bollaclaw --lines 30"
+    bw_event "error" "Post-start health check failed — status errored"
+    ;;
+  stopped|stopping)
+    warn "Bot parou imediatamente (status: ${BC_STATUS})"
+    warn "Verifique: bollaclaw logs"
+    ;;
+  *)
+    info "Status do bot: ${BC_STATUS}. Verifique com: pm2 status"
+    ;;
+esac
+
+bw_event "info" "Install complete — BollaClaw active via PM2 (status: ${BC_STATUS})"
 
 # ══════════════════════════════════════════════════════════════
 # FINAL SUMMARY

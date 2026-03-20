@@ -407,56 +407,249 @@ function printModelTable(models: ModelInfo[]) {
   }
 }
 
-// ── Update ──────────────────────────────────────────────────
+// ── Update v2 — Bulletproof CLI Update ──────────────────────
+
+const UPDATE_LOCK = '.update.lock';
+const UPDATE_BACKUP = '.update-backup';
+
+function cliGit(args: string): string {
+  return execSync(`git ${args}`, { cwd: projectRoot, encoding: 'utf-8', timeout: 30_000 });
+}
+
+function cliExec(cmd: string, timeoutMs = 180_000): string {
+  return execSync(cmd, { cwd: projectRoot, encoding: 'utf-8', timeout: timeoutMs });
+}
+
+function isUpdateLocked(): boolean {
+  const lockPath = path.join(projectRoot, UPDATE_LOCK);
+  if (!fs.existsSync(lockPath)) return false;
+  try {
+    const lock = JSON.parse(fs.readFileSync(lockPath, 'utf-8'));
+    const age = Date.now() - new Date(lock.startedAt).getTime();
+    if (age > 10 * 60 * 1000) {
+      fs.unlinkSync(lockPath);
+      return false;
+    }
+    return true;
+  } catch {
+    try { fs.unlinkSync(lockPath); } catch { /* ignore */ }
+    return false;
+  }
+}
+
+function acquireUpdateLock(): void {
+  fs.writeFileSync(path.join(projectRoot, UPDATE_LOCK), JSON.stringify({
+    pid: process.pid,
+    startedAt: new Date().toISOString(),
+  }));
+}
+
+function releaseUpdateLock(): void {
+  try { fs.unlinkSync(path.join(projectRoot, UPDATE_LOCK)); } catch { /* ignore */ }
+}
+
+function backupDist(): boolean {
+  const distPath = path.join(projectRoot, 'dist');
+  const backupPath = path.join(projectRoot, UPDATE_BACKUP);
+  if (!fs.existsSync(distPath)) return false;
+  try {
+    if (fs.existsSync(backupPath)) fs.rmSync(backupPath, { recursive: true, force: true });
+    fs.cpSync(distPath, backupPath, { recursive: true });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function restoreDist(): void {
+  const distPath = path.join(projectRoot, 'dist');
+  const backupPath = path.join(projectRoot, UPDATE_BACKUP);
+  if (!fs.existsSync(backupPath)) return;
+  try {
+    if (fs.existsSync(distPath)) fs.rmSync(distPath, { recursive: true, force: true });
+    fs.renameSync(backupPath, distPath);
+  } catch { /* ignore */ }
+}
+
+function cleanupBackup(): void {
+  const backupPath = path.join(projectRoot, UPDATE_BACKUP);
+  try { if (fs.existsSync(backupPath)) fs.rmSync(backupPath, { recursive: true, force: true }); } catch { /* ignore */ }
+}
 
 async function cmdUpdate(_args: string[]) {
-  console.log(`\n  ${W}🔄 Auto-Updater${NC}\n`);
+  console.log(`\n  ${W}🔄 BollaClaw Updater v2${NC}\n`);
+
+  // ── Pre-checks ───────────────────────────────────────────
+  // Check git repo
+  try {
+    cliGit('rev-parse --is-inside-work-tree');
+  } catch {
+    console.log(`  ${R}✘ Não é um repositório git.${NC}\n`);
+    process.exit(1);
+  }
+
+  // Check lock
+  if (isUpdateLocked()) {
+    console.log(`  ${R}✘ Outra atualização em andamento. Tente novamente em alguns minutos.${NC}\n`);
+    process.exit(1);
+  }
+
+  // Check disk space (need at least 200MB free)
+  try {
+    const dfOut = cliExec('df -BM --output=avail . | tail -1', 5000).trim();
+    const freeMB = parseInt(dfOut.replace('M', ''), 10);
+    if (freeMB < 200) {
+      console.log(`  ${R}✘ Espaço em disco insuficiente (${freeMB}MB). Necessário: 200MB.${NC}\n`);
+      process.exit(1);
+    }
+  } catch { /* non-fatal, continue */ }
+
+  let previousCommit = '';
+  let hasBackup = false;
 
   try {
-    const currentCommit = execSync('git rev-parse HEAD', { encoding: 'utf-8', cwd: projectRoot }).trim();
-    console.log(`  ${DIM}├─${NC} Commit atual: ${C}${currentCommit.substring(0, 8)}${NC}`);
+    previousCommit = cliGit('rev-parse HEAD').trim();
+    const branch = cliGit('branch --show-current').trim() || 'main';
 
+    console.log(`  ${DIM}├─${NC} Commit atual:  ${C}${previousCommit.substring(0, 8)}${NC}`);
+    console.log(`  ${DIM}├─${NC} Branch:        ${C}${branch}${NC}`);
+
+    // ── Step 1: Fetch ──────────────────────────────────────
     console.log(`  ${DIM}├─${NC} Verificando atualizações...`);
-    execSync('git fetch origin --quiet', { cwd: projectRoot, timeout: 15000 });
+    cliGit('fetch origin --quiet');
 
-    const branch = execSync('git branch --show-current', { encoding: 'utf-8', cwd: projectRoot }).trim();
-    const remoteCommit = execSync(`git rev-parse origin/${branch}`, { encoding: 'utf-8', cwd: projectRoot }).trim();
+    const remoteCommit = cliGit(`rev-parse origin/${branch}`).trim();
 
-    if (currentCommit === remoteCommit) {
+    if (previousCommit === remoteCommit) {
       console.log(`  ${DIM}└─${NC} ${G}✔ Já está atualizado!${NC}\n`);
       return;
     }
 
-    const behind = execSync(`git rev-list ${currentCommit}..${remoteCommit} --count`, { encoding: 'utf-8', cwd: projectRoot }).trim();
+    const behind = parseInt(cliGit(`rev-list ${previousCommit}..${remoteCommit} --count`).trim(), 10) || 0;
+    if (behind === 0) {
+      console.log(`  ${DIM}└─${NC} ${G}✔ Já está atualizado!${NC}\n`);
+      return;
+    }
+
+    // Show changelog preview
     console.log(`  ${DIM}├─${NC} ${Y}${behind} commit(s) disponíveis${NC}`);
-    console.log(`  ${DIM}├─${NC} Aplicando atualização...`);
+    try {
+      const log = cliGit(`log --oneline ${previousCommit}..${remoteCommit} -5`).trim();
+      for (const line of log.split('\n')) {
+        console.log(`  ${DIM}│  ${NC}  ${DIM}${line}${NC}`);
+      }
+      if (behind > 5) {
+        console.log(`  ${DIM}│  ${NC}  ${DIM}... e mais ${behind - 5}${NC}`);
+      }
+    } catch { /* non-fatal */ }
 
-    // Reset local changes (package-lock etc) to avoid merge conflicts
-    execSync('git reset --hard HEAD', { cwd: projectRoot, timeout: 10000 });
-    execSync(`git pull origin ${branch} --quiet`, { cwd: projectRoot, timeout: 30000 });
-    console.log(`  ${DIM}├─${NC} ${G}✔ Pull OK${NC}`);
+    // ── Acquire lock ───────────────────────────────────────
+    acquireUpdateLock();
 
-    console.log(`  ${DIM}├─${NC} Instalando dependências...`);
-    execSync('npm install --production=false --quiet 2>&1', { cwd: projectRoot, timeout: 120000 });
+    // ── Step 2: Backup dist/ ───────────────────────────────
+    console.log(`  ${DIM}├─${NC} [1/6] Fazendo backup do dist/...`);
+    hasBackup = backupDist();
+    if (hasBackup) {
+      console.log(`  ${DIM}│  ${NC}  ${G}✔ Backup criado${NC}`);
+    } else {
+      console.log(`  ${DIM}│  ${NC}  ${Y}⚠ Sem dist/ para backup (primeiro build?)${NC}`);
+    }
 
-    console.log(`  ${DIM}├─${NC} Compilando...`);
-    execSync('npm run build 2>&1', { cwd: projectRoot, timeout: 120000 });
+    // ── Step 3: Pull ───────────────────────────────────────
+    console.log(`  ${DIM}├─${NC} [2/6] Baixando atualizações...`);
+    try { cliGit('reset --hard HEAD'); } catch { /* ignore */ }
+    cliGit(`pull origin ${branch} --quiet`);
+    console.log(`  ${DIM}│  ${NC}  ${G}✔ Pull OK${NC}`);
 
-    const newCommit = execSync('git rev-parse HEAD', { encoding: 'utf-8', cwd: projectRoot }).trim();
-    console.log(`  ${DIM}├─${NC} Novo commit: ${G}${newCommit.substring(0, 8)}${NC}`);
-    console.log(`  ${DIM}├─${NC} ${G}✔ Atualização concluída!${NC}`);
-    console.log(`  ${DIM}├─${NC} Reiniciando via PM2...`);
+    // ── Step 4: Install deps ───────────────────────────────
+    console.log(`  ${DIM}├─${NC} [3/6] Instalando dependências...`);
+    cliExec('npm install --production=false --quiet 2>&1', 180_000);
+    console.log(`  ${DIM}│  ${NC}  ${G}✔ npm install OK${NC}`);
+
+    // ── Step 5: Build ──────────────────────────────────────
+    console.log(`  ${DIM}├─${NC} [4/6] Compilando TypeScript...`);
+    cliExec('npm run build 2>&1', 180_000);
+    console.log(`  ${DIM}│  ${NC}  ${G}✔ Build OK${NC}`);
+
+    // ── Step 6: Verify build ───────────────────────────────
+    console.log(`  ${DIM}├─${NC} [5/6] Verificando build...`);
+    const mainJs = path.join(projectRoot, 'dist', 'main.js');
+    if (!fs.existsSync(mainJs)) {
+      throw new Error('Verificação falhou: dist/main.js não encontrado após build');
+    }
+    // Check file isn't empty
+    const stat = fs.statSync(mainJs);
+    if (stat.size < 100) {
+      throw new Error(`Verificação falhou: dist/main.js muito pequeno (${stat.size} bytes)`);
+    }
+    console.log(`  ${DIM}│  ${NC}  ${G}✔ dist/main.js verificado (${Math.round(stat.size / 1024)}KB)${NC}`);
+
+    // ── Step 7: PM2 restart ────────────────────────────────
+    const newCommit = cliGit('rev-parse HEAD').trim();
+    console.log(`  ${DIM}├─${NC} [6/6] Reiniciando via PM2...`);
+    console.log(`  ${DIM}│  ${NC}  ${DIM}${previousCommit.substring(0, 8)} → ${newCommit.substring(0, 8)}${NC}`);
 
     try {
-      execSync('pm2 restart bollaclaw --update-env', { cwd: projectRoot, timeout: 15000 });
-      console.log(`  ${DIM}└─${NC} ${G}✔ Reiniciado com sucesso!${NC}\n`);
+      execSync('pm2 restart bollaclaw --update-env', { cwd: projectRoot, timeout: 30_000 });
+
+      // Wait and check PM2 status
+      await new Promise(res => setTimeout(res, 3000));
+      try {
+        const pm2Status = cliExec('pm2 jlist', 10_000);
+        const processes = JSON.parse(pm2Status);
+        const bcProcess = processes.find((p: any) => p.name === 'bollaclaw');
+        if (bcProcess && bcProcess.pm2_env?.status === 'online') {
+          console.log(`  ${DIM}│  ${NC}  ${G}✔ PM2 rodando (status: online)${NC}`);
+        } else if (bcProcess) {
+          console.log(`  ${DIM}│  ${NC}  ${Y}⚠ PM2 status: ${bcProcess.pm2_env?.status || 'unknown'}${NC}`);
+        }
+      } catch { /* non-fatal */ }
+
+      // Cleanup backup on success
+      cleanupBackup();
+      releaseUpdateLock();
+
+      console.log(`  ${DIM}└─${NC} ${G}✔ Atualização concluída com sucesso!${NC}`);
+      console.log(`\n  ${DIM}Commit: ${newCommit.substring(0, 8)} | Logs: bollaclaw logs${NC}\n`);
+
     } catch {
-      console.log(`  ${DIM}└─${NC} ${Y}⚠ PM2 restart falhou. Execute: bollaclaw restart${NC}\n`);
+      console.log(`  ${DIM}│  ${NC}  ${Y}⚠ PM2 restart falhou. Execute manualmente: pm2 restart bollaclaw${NC}`);
+      // Build succeeded, just PM2 failed — don't rollback, just warn
+      cleanupBackup();
+      releaseUpdateLock();
+      console.log(`  ${DIM}└─${NC} ${Y}⚠ Build OK mas restart falhou. Execute: bollaclaw restart${NC}\n`);
     }
 
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : String(err);
-    console.log(`  ${DIM}└─${NC} ${R}✘ Erro: ${msg}${NC}\n`);
+    console.log(`  ${DIM}│${NC}`);
+    console.log(`  ${R}✘ ERRO: ${msg}${NC}`);
+    console.log(`  ${DIM}│${NC}`);
+
+    // ── ROLLBACK ───────────────────────────────────────────
+    if (previousCommit && previousCommit !== 'unknown') {
+      console.log(`  ${Y}↩ Executando rollback...${NC}`);
+
+      // Rollback git
+      try {
+        cliGit(`reset --hard ${previousCommit}`);
+        console.log(`  ${DIM}├─${NC} Git restaurado para ${C}${previousCommit.substring(0, 8)}${NC}`);
+      } catch (gitErr) {
+        console.log(`  ${DIM}├─${NC} ${R}Rollback git falhou: ${gitErr}${NC}`);
+      }
+
+      // Restore dist/
+      if (hasBackup) {
+        restoreDist();
+        console.log(`  ${DIM}├─${NC} dist/ restaurado do backup`);
+      }
+
+      console.log(`  ${DIM}└─${NC} ${G}Rollback concluído. Bot continua funcionando normalmente.${NC}\n`);
+    } else {
+      console.log(`  ${DIM}└─${NC} ${R}Não foi possível fazer rollback.${NC}\n`);
+    }
+
+    releaseUpdateLock();
     process.exit(1);
   }
 }
