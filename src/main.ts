@@ -107,7 +107,7 @@ const cleanupTimer = setInterval(() => {
 // ── Start Server ──────────────────────────────────────────
 
 const server = app.listen(PORT, HOST, () => {
-  const secret = process.env.BOLLAWATCH_SECRET || '35868115';
+  const secret = process.env.BOLLAWATCH_SECRET || 'bollaclaw';
   console.log(`
 ╔═══════════════════════════════════════════════════╗
 ║   👁️  BollaWatch v2 — Telemetry Hub              ║

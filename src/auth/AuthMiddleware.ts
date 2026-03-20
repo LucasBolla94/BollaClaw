@@ -15,7 +15,7 @@ const SESSION_DURATION_MS = 24 * 60 * 60 * 1000; // 24 hours
 const sessions = new Map<string, { createdAt: number }>();
 
 function getSecret(): string {
-  return process.env.BOLLAWATCH_SECRET || '35868115';
+  return process.env.BOLLAWATCH_SECRET || 'bollaclaw';
 }
 
 function generateSessionId(): string {
