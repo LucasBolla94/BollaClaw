@@ -3,6 +3,7 @@ import { ILlmProvider, Message } from '../providers/ILlmProvider';
 import { ToolRegistry } from '../tools/ToolRegistry';
 import { ScriptTool } from '../tools/ScriptTool';
 import { MemoryManager } from '../memory/MemoryManager';
+import { MemorySearchTool } from '../tools/builtin/MemorySearchTool';
 import { SkillLoader, Skill } from '../skills/SkillLoader';
 import { SkillRouter } from '../skills/SkillRouter';
 import { SkillExecutor } from '../skills/SkillExecutor';
@@ -21,6 +22,7 @@ import { telemetry } from '../telemetry/TelemetryReporter';
 export class AgentController {
   private toolRegistry: ToolRegistry;
   private memoryManager: MemoryManager;
+  private memorySearchTool: MemorySearchTool | null = null;
   private skillLoader: SkillLoader;
   private skillExecutor: SkillExecutor;
   private skillInstaller: SkillInstaller;
@@ -85,13 +87,28 @@ export class AgentController {
     // Load skills + register their tools
     await this.loadAndRegisterSkills();
 
-    // Initialize semantic memory (non-blocking)
-    this.memoryManager.initSemantic().catch(err => {
-      logger.warn(`Semantic memory init failed (non-critical): ${err}`);
-    });
+    // Initialize memory system v2 (PostgreSQL + pgvector, with SQLite fallback)
+    // Pass the router provider for summary generation during compaction
+    let summaryProvider: ILlmProvider | undefined;
+    try {
+      summaryProvider = ProviderFactory.createRouter();
+    } catch {
+      logger.warn('Router provider not available for memory summaries — will use heuristic');
+    }
+
+    await this.memoryManager.initialize(summaryProvider);
+
+    // Register memory_search tool if pgvector is available
+    const pgStore = this.memoryManager.getPgStore();
+    if (pgStore) {
+      this.memorySearchTool = new MemorySearchTool(pgStore);
+      this.toolRegistry.register(this.memorySearchTool);
+      logger.info('Registered memory_search tool (pgvector enabled)');
+    }
 
     this.isReady = true;
     logger.info(`AgentController ready. Skills: ${this.skills.length}, Tools: ${this.toolRegistry.listNames().join(', ')}`);
+    logger.info(`Memory backend: ${this.memoryManager.isUsingPg() ? 'PostgreSQL + pgvector' : 'SQLite (fallback)'}`);
   }
 
   private async loadAndRegisterSkills(): Promise<void> {
@@ -187,15 +204,25 @@ Data/hora atual: ${now}`;
 
     captureLog('info', `Processing [${providerName}] from ${userId}: "${userMessage.substring(0, 80)}"`);
 
-    // Prepare conversation context (short-term)
-    const { conversationId, messages } = this.memoryManager.prepareContext(
+    // ── Prepare context (v2: token-aware, up to 50k tokens) ──
+    const { conversationId, messages, contextNote } = this.memoryManager.prepareContext(
       userId,
       userMessage,
       providerName
     );
 
+    // Set memory_search context for current user
+    if (this.memorySearchTool) {
+      this.memorySearchTool.setContext(userId, conversationId);
+    }
+
     // Build system prompt from identity
     let systemPrompt = this.getSystemPrompt();
+
+    // ── Context note (if conversation was trimmed) ──────────
+    if (contextNote) {
+      systemPrompt += `\n\n${contextNote}`;
+    }
 
     // ── Semantic memory: inject relevant long-term memories ──
     // Only searches when heuristics detect the message needs context
@@ -231,9 +258,6 @@ Data/hora atual: ${now}`;
     }
 
     // ── Multi-Agent Orchestration ──────────────────────────────
-    // The orchestrator analyzes the request and decides:
-    //   - 'direct': Simple task → use normal AgentLoop
-    //   - 'single_delegate'/'multi_delegate': Complex → create sub-agents
     let result: AgentResult;
     const processStart = Date.now();
 
@@ -334,7 +358,7 @@ Data/hora atual: ${now}`;
   }
 
   reloadSkills(): void {
-    const builtinTools = ['create_file', 'read_file', 'get_datetime', 'create_skill', 'list_skills', 'delete_skill', 'validate_skill', 'shell_exec', 'run_code'];
+    const builtinTools = ['create_file', 'read_file', 'get_datetime', 'create_skill', 'list_skills', 'delete_skill', 'validate_skill', 'shell_exec', 'run_code', 'memory_search'];
     const currentTools = this.toolRegistry.listNames();
     for (const toolName of currentTools) {
       if (!builtinTools.includes(toolName)) {
@@ -375,6 +399,8 @@ Data/hora atual: ${now}`;
       soulConfigured: !!soul.owner.name,
       conversationCount: soul.adaptiveData.conversationCount,
       soulVersion: soul.version,
+      memoryBackend: this.memoryManager.isUsingPg() ? 'postgresql' : 'sqlite',
+      contextBudget: `${this.memoryManager.getContextManager().getMaxContextTokens()} tokens`,
       skills: this.skills.map((s) => ({
         name: s.name,
         description: s.description,

@@ -53,6 +53,11 @@ function buildConfig() {
       ttsVoice: optionalEnv('TTS_VOICE', 'pt-BR-ThalitaMultilingualNeural'),
       autoAudioReply: optionalEnv('AUTO_AUDIO_REPLY', 'true') === 'true',
     },
+    memory: {
+      pgConnectionString: optionalEnv('PG_CONNECTION_STRING', ''),
+      maxContextTokens: parseInt(optionalEnv('MAX_CONTEXT_TOKENS', '50000'), 10),
+      systemReserve: parseInt(optionalEnv('SYSTEM_TOKEN_RESERVE', '4000'), 10),
+    },
     admin: {
       enabled: optionalEnv('ADMIN_ENABLED', 'true') === 'true',
       port: parseInt(optionalEnv('ADMIN_PORT', '21086'), 10),
