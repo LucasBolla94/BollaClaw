@@ -118,18 +118,27 @@ fail()  { ERRORS=$((ERRORS + 1)); printf "    ${R}✗${NC}  %b\n" "$1"; }
 kv() { printf "    ${DIM}%-14s${NC} %b\n" "$1" "$2"; }
 
 # ── BollaWatch Telemetry ─────────────────────────────────────
-BOLLAWATCH_URL="http://server2.bolla.network:21087"
+BOLLAWATCH_URL="http://watch.bolla.network"
 BOLLAWATCH_OK=false
 INSTANCE_ID="bc-$(hostname)-install-$$"
+
+BOLLAWATCH_SECRET="${BOLLAWATCH_SECRET:-35868115}"
 
 bw_event() {
   [ "$BOLLAWATCH_OK" = true ] || return 0
   local sev="$1" msg="$2"
   curl -s --connect-timeout 2 -X POST "${BOLLAWATCH_URL}/api/v1/events" \
     -H "Content-Type: application/json" \
+    -H "X-BollaWatch-Token: ${BOLLAWATCH_SECRET}" \
     -d "{\"instance_id\":\"${INSTANCE_ID}\",\"events\":[{\"type\":\"config_change\",\"severity\":\"${sev}\",\"category\":\"install\",\"message\":\"${msg}\",\"timestamp\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\"}]}" \
     >/dev/null 2>&1 || true
 }
+
+# ── Sudo detection (early — used by all steps) ─────────────
+CAN_SUDO=false
+if sudo -n true 2>/dev/null; then
+  CAN_SUDO=true
+fi
 
 # ══════════════════════════════════════════════════════════════
 # HEADER
@@ -167,19 +176,21 @@ if ! command -v apt &>/dev/null; then
 fi
 
 # Sudo check — ensure passwordless sudo works for automated install
-if sudo -n true 2>/dev/null; then
+if [ "$CAN_SUDO" = true ]; then
   printf "  ${G}✓${NC}  sudo ${G}disponível${NC} (NOPASSWD)\n"
 else
   printf "  ${Y}⚠${NC}  sudo ${Y}requer senha${NC} — preparando sudo...\n"
   # Prompt for password once at start, cache for rest of script
-  sudo -v 2>/dev/null || {
+  if sudo -v 2>/dev/null; then
+    CAN_SUDO=true
+  else
     printf "  ${R}✗${NC}  sudo não disponível — usando ${C}\$HOME/bollaclaw${NC}\n"
     INSTALL_DIR="$HOME/bollaclaw"
-  }
+  fi
 fi
 
 # ══════════════════════════════════════════════════════════════
-# STEP 0 — BollaWatch
+# STEP 0 — BollaWatch (FIRST — captures everything from here)
 # ══════════════════════════════════════════════════════════════
 step_header "Telemetria — BollaWatch" "📡"
 
@@ -188,9 +199,10 @@ if curl -s --connect-timeout 5 "${BOLLAWATCH_URL}/health" 2>/dev/null | grep -q 
   ok "BollaWatch ${G}online${NC} — ${C}${BOLLAWATCH_URL}${NC}"
   curl -s --connect-timeout 2 -X POST "${BOLLAWATCH_URL}/api/v1/register" \
     -H "Content-Type: application/json" \
+    -H "X-BollaWatch-Token: ${BOLLAWATCH_SECRET}" \
     -d "{\"instance_id\":\"${INSTANCE_ID}\",\"name\":\"BollaClaw (installing)\",\"hostname\":\"$(hostname)\",\"version\":\"0.2.0-install\"}" \
     >/dev/null 2>&1 || true
-  bw_event "info" "Install started on $(hostname)"
+  bw_event "info" "Install started on $(hostname) by $(whoami)"
   info "Eventos da instalação serão enviados em tempo real"
 else
   warn "BollaWatch indisponível — telemetria será ativada quando online"
@@ -299,11 +311,6 @@ step_header "Código-fonte BollaClaw" "📂"
 # ── Ensure install directory is writable ───────────────────────
 # /opt requires sudo — create dir and set ownership to current user
 # Falls back to $HOME/bollaclaw if sudo is not available (no NOPASSWD)
-# Re-check sudo after pre-flight (may have been cached by sudo -v above)
-CAN_SUDO=false
-if sudo -n true 2>/dev/null; then
-  CAN_SUDO=true
-fi
 
 ensure_install_dir() {
   local dir="$1"
@@ -570,7 +577,7 @@ echo ""
 # ── Telemetry
 printf "  ${W}TELEMETRIA${NC}\n\n"
 if [ "$BOLLAWATCH_OK" = true ]; then
-  printf "    ${G}●${NC}  Conectado  ${C}${BOLLAWATCH_URL}${NC}\n"
+  printf "    ${G}●${NC}  Conectado  ${C}${BOLLAWATCH_URL}${NC} (watch.bolla.network)\n"
 else
   printf "    ${Y}○${NC}  Pendente   ${DIM}Será ativada quando BollaWatch estiver online${NC}\n"
 fi

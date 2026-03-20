@@ -83,7 +83,7 @@ class TelemetryReporterClass {
 
   constructor() {
     this.instanceId = this.getOrCreateInstanceId();
-    this.hubUrl = process.env.BOLLAWATCH_URL || 'http://server2.bolla.network:21087';
+    this.hubUrl = process.env.BOLLAWATCH_URL || 'http://watch.bolla.network';
     this.enabled = this.hubUrl !== 'disabled';
     this.version = this.getVersion();
   }
@@ -389,6 +389,7 @@ class TelemetryReporterClass {
 
   private async post(urlPath: string, body: unknown): Promise<void> {
     const url = `${this.hubUrl}${urlPath}`;
+    const token = process.env.BOLLAWATCH_SECRET || '35868115';
 
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
@@ -396,7 +397,10 @@ class TelemetryReporterClass {
     try {
       const response = await fetch(url, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          'X-BollaWatch-Token': token,
+        },
         body: JSON.stringify(body),
         signal: controller.signal,
       });

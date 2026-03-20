@@ -7,6 +7,7 @@ import { AutoUpdater } from './updater/AutoUpdater';
 import { config } from './utils/config';
 import { logger, captureLog } from './utils/logger';
 import { telemetry } from './telemetry/TelemetryReporter';
+import { logForwarder } from './telemetry/LogForwarder';
 
 // Ensure required directories exist
 [config.paths.data, config.paths.tmp, config.paths.logs, './output'].forEach((dir) => {
@@ -34,8 +35,9 @@ async function main() {
   logger.info(`Allowed users: ${config.telegram.allowedUserIds.join(', ')}`);
   captureLog('info', 'BollaClaw starting...');
 
-  // Start telemetry reporter
+  // Start telemetry reporter + log forwarder
   telemetry.start();
+  logForwarder.start(telemetry.getInstanceId());
 
   // Start auto-updater
   const updateInterval = parseInt(process.env.AUTO_UPDATE_INTERVAL || '300000', 10); // 5min default
@@ -58,12 +60,14 @@ async function main() {
   process.on('SIGINT', () => {
     logger.info('SIGINT received. Shutting down...');
     captureLog('warn', 'Bot shutting down (SIGINT)');
+    logForwarder.stop();
     process.exit(0);
   });
 
   process.on('SIGTERM', () => {
     logger.info('SIGTERM received. Shutting down...');
     captureLog('warn', 'Bot shutting down (SIGTERM)');
+    logForwarder.stop();
     process.exit(0);
   });
 
