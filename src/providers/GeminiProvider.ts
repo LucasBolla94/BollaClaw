@@ -1,5 +1,5 @@
 import { GoogleGenerativeAI, FunctionDeclaration, Tool, Part } from '@google/generative-ai';
-import { ILlmProvider, Message, ToolDefinition, LlmResponse, ToolCall } from './ILlmProvider';
+import { ILlmProvider, Message, ToolDefinition, LlmResponse, ToolCall, CompletionOptions } from './ILlmProvider';
 import { ProviderEntry } from './ProviderConfig';
 import { logger } from '../utils/logger';
 
@@ -14,7 +14,7 @@ export class GeminiProvider implements ILlmProvider {
     this.client = new GoogleGenerativeAI(entry.apiKey);
   }
 
-  async complete(messages: Message[], tools?: ToolDefinition[]): Promise<LlmResponse> {
+  async complete(messages: Message[], tools?: ToolDefinition[], _options?: CompletionOptions): Promise<LlmResponse> {
     const systemMessages = messages.filter((m) => m.role === 'system');
     const chatMessages = messages.filter((m) => m.role !== 'system');
     const systemInstruction = systemMessages.map((m) => m.content).join('\n\n');

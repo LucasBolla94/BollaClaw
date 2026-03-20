@@ -367,35 +367,46 @@ export class SoulEngine {
   // Inspired by OpenClaw's "Tool Call Style" + file delivery
 
   private getToolCallingRules(): string {
-    return `## Tool Calling — REGRAS OBRIGATÓRIAS
+    return `## Tool Calling — REGRAS OBRIGATÓRIAS (PRIORIDADE MÁXIMA)
 
-ESTILO DE TOOL CALLS:
-- NÃO narre tool calls rotineiras. Apenas chame a tool silenciosamente.
-- Narre apenas quando ajuda: trabalho multi-step, problemas complexos, ou quando o usuário pedir.
-- Nomes de tools são case-sensitive. Chame exatamente como listadas.
+### REGRA #1: AÇÃO, NÃO NARRAÇÃO
+Quando o usuário pede algo que requer uma ferramenta (criar arquivo, executar código, buscar dados):
+- CHAME A FERRAMENTA IMEDIATAMENTE. Não descreva, não narre, não explique o que vai fazer.
+- NÃO escreva JSON de tool calls no texto. Use o mecanismo NATIVO de function calling.
+- NÃO diga "vou usar a função X" — simplesmente USE a função X.
 
-ANTI-ALUCINAÇÃO — REGRA MAIS IMPORTANTE:
-- NUNCA afirme ter feito algo sem ter realmente chamado a tool correspondente
-- NUNCA diga "o arquivo foi criado" sem ter chamado create_file, create_pdf, create_docx ou create_xlsx
-- NUNCA diga "aqui está o arquivo" sem ter o caminho real retornado pela tool
-- Se o usuário pedir algo que requer uma tool, CHAME A TOOL PRIMEIRO, depois responda com o resultado
-- Se uma tool falhar, diga que falhou — não finja que funcionou
+### REGRA #2: ANTI-ALUCINAÇÃO (MAIS IMPORTANTE DE TODAS)
+- NUNCA afirme ter feito algo sem ter chamado a ferramenta correspondente
+- NUNCA diga "o arquivo foi criado/gerado/pronto" sem ter chamado create_pdf/create_docx/create_xlsx/create_file
+- NUNCA diga "aqui está o arquivo/PDF/documento" sem ter o path real retornado por uma ferramenta
+- Se uma ferramenta falhou, diga que falhou. Não finja que funcionou.
 
-CRIAÇÃO E ENVIO DE ARQUIVOS:
-- Para criar documentos: use create_pdf, create_docx, create_xlsx ou create_file
-- Após criar, a tool retorna o caminho do arquivo (ex: ./output/relatorio.pdf)
-- Na sua resposta final, INCLUA [FILE:caminho] para enviar ao usuário via Telegram
-- Exemplo correto: "Pronto! 📄 [FILE:./output/relatorio.pdf]"
-- Exemplo ERRADO: "O arquivo foi criado no diretório output" (isso NÃO envia o arquivo!)
+### REGRA #3: CRIAÇÃO DE ARQUIVOS
+Quando o usuário pedir para criar um PDF, Word, Excel ou qualquer documento:
+1. Chame a ferramenta create_pdf, create_docx, create_xlsx ou create_file com os parâmetros adequados
+2. Aguarde o resultado
+3. Se sucesso, responda com [FILE:caminho_retornado] para entregar via Telegram
 
-QUANDO O USUÁRIO PEDE "ENVIA" OU "MANDA":
-- Se o arquivo já existe (criado anteriormente), use [FILE:caminho] com o path conhecido
-- Se NÃO existe, crie o arquivo primeiro usando a tool apropriada, depois envie
+### REGRA #4: ENVIO DE ARQUIVOS
+Quando o usuário pedir "envia", "manda", "me envia o arquivo":
+- Se o arquivo existe (criado antes), inclua [FILE:caminho] na resposta
+- Se NÃO existe, crie primeiro chamando a ferramenta, depois inclua [FILE:caminho]
 
-CONVERSAS NORMAIS:
-- Para perguntas simples, responda direto sem usar tools
-- Não use tools desnecessariamente para perguntas como "tudo bem?" ou "como vai?"
-- Só use tools quando a tarefa realmente precisa delas`;
+### REGRA #5: CONVERSAS NORMAIS
+- Para perguntas simples ("tudo bem?", "como vai?"), responda direto sem ferramentas
+- Só use ferramentas quando a tarefa realmente precisa delas
+
+### EXEMPLOS DE COMPORTAMENTO CORRETO vs ERRADO
+
+CORRETO: Usuário diz "Crie um PDF da minha empresa"
+→ Você chama create_pdf com título e conteúdo
+→ Ferramenta retorna "./output/empresa.pdf"
+→ Você responde: "Pronto! [FILE:./output/empresa.pdf]"
+
+ERRADO: Usuário diz "Crie um PDF da minha empresa"
+→ Você responde: "Aqui está o PDF da sua empresa!" (SEM chamar ferramenta = ALUCINAÇÃO)
+→ Você responde: "Vou usar a função create_pdf para..." (NARRAÇÃO em vez de AÇÃO)
+→ Você escreve: {"name":"create_pdf","parameters":{...}} (JSON cru = ERRO)`;
   }
 
   // ── Humanizer Rules ────────────────────────────────────────

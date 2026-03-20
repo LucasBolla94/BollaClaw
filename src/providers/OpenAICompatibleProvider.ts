@@ -1,5 +1,5 @@
 import OpenAI from 'openai';
-import { ILlmProvider, Message, ToolDefinition, LlmResponse, ToolCall } from './ILlmProvider';
+import { ILlmProvider, Message, ToolDefinition, LlmResponse, ToolCall, CompletionOptions } from './ILlmProvider';
 import { ProviderEntry } from './ProviderConfig';
 import { logger } from '../utils/logger';
 
@@ -37,7 +37,7 @@ export class OpenAICompatibleProvider implements ILlmProvider {
     this.client = new OpenAI(clientOptions as any);
   }
 
-  async complete(messages: Message[], tools?: ToolDefinition[]): Promise<LlmResponse> {
+  async complete(messages: Message[], tools?: ToolDefinition[], options?: CompletionOptions): Promise<LlmResponse> {
     const openaiMessages: OpenAI.Chat.ChatCompletionMessageParam[] = [];
 
     for (const m of messages) {
@@ -89,7 +89,7 @@ export class OpenAICompatibleProvider implements ILlmProvider {
 
       if (openaiTools && openaiTools.length > 0) {
         requestParams.tools = openaiTools;
-        requestParams.tool_choice = 'auto';
+        requestParams.tool_choice = options?.toolChoice ?? 'auto';
       }
 
       if (this.temperature !== undefined) {

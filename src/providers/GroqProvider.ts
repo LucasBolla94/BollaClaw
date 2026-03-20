@@ -1,5 +1,5 @@
 import Groq from 'groq-sdk';
-import { ILlmProvider, Message, ToolDefinition, LlmResponse, ToolCall } from './ILlmProvider';
+import { ILlmProvider, Message, ToolDefinition, LlmResponse, ToolCall, CompletionOptions } from './ILlmProvider';
 import { logger } from '../utils/logger';
 
 export class GroqProvider implements ILlmProvider {
@@ -12,7 +12,7 @@ export class GroqProvider implements ILlmProvider {
     this.model = model;
   }
 
-  async complete(messages: Message[], tools?: ToolDefinition[]): Promise<LlmResponse> {
+  async complete(messages: Message[], tools?: ToolDefinition[], _options?: CompletionOptions): Promise<LlmResponse> {
     const groqMessages = messages.map((m) => ({
       role: m.role as any,
       content: m.content,

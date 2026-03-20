@@ -25,7 +25,12 @@ export interface LlmResponse {
   isFinished: boolean;
 }
 
+export interface CompletionOptions {
+  /** Force the model to use a tool. 'auto' = model decides, 'required' = must use a tool, 'none' = no tools */
+  toolChoice?: 'auto' | 'required' | 'none';
+}
+
 export interface ILlmProvider {
   name: string;
-  complete(messages: Message[], tools?: ToolDefinition[]): Promise<LlmResponse>;
+  complete(messages: Message[], tools?: ToolDefinition[], options?: CompletionOptions): Promise<LlmResponse>;
 }

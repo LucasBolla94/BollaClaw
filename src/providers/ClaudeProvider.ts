@@ -1,5 +1,5 @@
 import Anthropic from '@anthropic-ai/sdk';
-import { ILlmProvider, Message, ToolDefinition, LlmResponse, ToolCall } from './ILlmProvider';
+import { ILlmProvider, Message, ToolDefinition, LlmResponse, ToolCall, CompletionOptions } from './ILlmProvider';
 import { ProviderEntry } from './ProviderConfig';
 import { logger } from '../utils/logger';
 
@@ -16,7 +16,7 @@ export class ClaudeProvider implements ILlmProvider {
     this.client = new Anthropic({ apiKey: entry.apiKey });
   }
 
-  async complete(messages: Message[], tools?: ToolDefinition[]): Promise<LlmResponse> {
+  async complete(messages: Message[], tools?: ToolDefinition[], options?: CompletionOptions): Promise<LlmResponse> {
     const systemMessages = messages.filter((m) => m.role === 'system');
     const chatMessages = messages.filter((m) => m.role !== 'system');
     const systemPrompt = systemMessages.map((m) => m.content).join('\n\n');

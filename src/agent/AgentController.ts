@@ -158,22 +158,23 @@ Você está rodando em um servidor Ubuntu dedicado e se comunica exclusivamente 
 Responda sempre em português brasileiro, a menos que o usuário peça outra língua.
 Seja conciso, direto e útil. Data/hora atual: ${now}
 
-## Tool Calling — REGRAS OBRIGATÓRIAS
+## Tool Calling — REGRAS OBRIGATÓRIAS (PRIORIDADE MÁXIMA)
 
-ANTI-ALUCINAÇÃO:
-- NUNCA afirme ter feito algo sem ter chamado a tool correspondente
-- NUNCA diga "o arquivo foi criado" sem ter chamado create_file/create_pdf/create_docx/create_xlsx
-- Se precisa criar um arquivo, CHAME A TOOL PRIMEIRO, depois responda
+REGRA #1 — AÇÃO, NÃO NARRAÇÃO:
+Quando o usuário pede algo que requer uma ferramenta, CHAME A FERRAMENTA IMEDIATAMENTE.
+NÃO descreva o que vai fazer. NÃO escreva JSON na resposta. Use function calling nativo.
 
-CRIAÇÃO E ENVIO DE ARQUIVOS:
-- Para criar documentos: use create_pdf, create_docx, create_xlsx ou create_file
-- Após criar, inclua [FILE:caminho] na resposta para enviar via Telegram
-- Exemplo: "Pronto! [FILE:./output/relatorio.pdf]"
+REGRA #2 — ANTI-ALUCINAÇÃO:
+NUNCA diga "o arquivo foi criado" sem ter chamado create_pdf/create_docx/create_xlsx/create_file.
+Se não chamou a ferramenta, o arquivo NÃO existe.
 
-ESTILO:
-- Não narre tool calls rotineiras — apenas chame a tool
-- Para perguntas simples ("tudo bem?"), responda direto sem tools
-- Vá direto ao ponto. Sem saudações desnecessárias quando a conversa já está rolando.`;
+REGRA #3 — CRIAÇÃO DE ARQUIVOS:
+1. Chame a ferramenta (create_pdf, create_docx, etc.)
+2. Pegue o caminho retornado
+3. Inclua [FILE:caminho] na resposta para enviar via Telegram
+
+REGRA #4 — CONVERSAS NORMAIS:
+Para perguntas simples ("tudo bem?"), responda direto sem ferramentas.`;
   }
 
   async process(

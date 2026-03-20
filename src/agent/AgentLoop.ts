@@ -1,9 +1,10 @@
-import { ILlmProvider, Message, ToolCall, LlmResponse, ToolDefinition } from '../providers/ILlmProvider';
+import { ILlmProvider, Message, ToolCall, LlmResponse, ToolDefinition, CompletionOptions } from '../providers/ILlmProvider';
 import { ToolRegistry } from '../tools/ToolRegistry';
 import { ToolResult } from '../tools/BaseTool';
 import { ThinkingEngine } from './ThinkingEngine';
 import { HookManager } from '../hooks/HookManager';
 import { parseToolCallsFromText, looksLikeToolCall, toToolCalls } from './ToolCallParser';
+import { detectHallucination } from './HallucinationDetector';
 import { config } from '../utils/config';
 import { logger, captureLog } from '../utils/logger';
 import { telemetry } from '../telemetry/TelemetryReporter';
@@ -84,6 +85,7 @@ export class AgentLoop {
     // ── Step 3: ReAct loop ──
     let iteration = 0;
     let totalToolCalls = 0;
+    let forceToolUse = false;  // Set after hallucination detection
     const loopStart = Date.now();
     const toolResultsForReflection: Array<{ tool: string; result: string; success: boolean }> = [];
 
@@ -100,7 +102,9 @@ export class AgentLoop {
       captureLog('info', `AgentLoop iteration ${iteration}`);
 
       // ── Call provider with retry ──
-      const response = await this.callProviderWithRetry(workingMessages, tools, iteration);
+      const completionOptions: CompletionOptions | undefined = forceToolUse ? { toolChoice: 'required' } : undefined;
+      const response = await this.callProviderWithRetry(workingMessages, tools, iteration, completionOptions);
+      forceToolUse = false;  // Reset after use
 
       if (!response) {
         // Provider failed even after retry
@@ -135,9 +139,41 @@ export class AgentLoop {
         }
       }
 
-      // ── No tool calls → final answer ──
+      // ── No tool calls → check for hallucination before returning ──
       if (effectiveToolCalls.length === 0) {
         let answer = contentForUser || 'Não consegui gerar uma resposta.';
+
+        // ── Hallucination detection: LLM claims it did something but didn't call any tool ──
+        // Example: "Aqui está o PDF que criei" or "preciso usar a função create_file"
+        // These indicate the LLM is TALKING about tools instead of USING them.
+        const hallucination = detectHallucination(answer, availableTools, totalToolCalls);
+        if (hallucination.detected && iteration < this.maxIterations) {
+          logger.warn(`[AgentLoop] HALLUCINATION DETECTED: ${hallucination.reason}`);
+          captureLog('warn', `Hallucination: ${hallucination.reason}`);
+          telemetry.track({
+            type: 'agent_event',
+            severity: 'warn',
+            category: 'hallucination',
+            message: hallucination.reason,
+            data: { iteration, answer: answer.substring(0, 200) },
+          });
+
+          // Inject correction message and continue the loop
+          workingMessages.push({
+            role: 'assistant',
+            content: answer,
+          });
+          workingMessages.push({
+            role: 'user',
+            content: hallucination.correctionPrompt,
+          });
+
+          // Force tool_choice: 'required' on next iteration
+          forceToolUse = true;
+
+          // Don't return — continue the loop so LLM can actually call the tool
+          continue;
+        }
 
         // Reflection for deep mode
         if (thinkingMode === 'deep' && toolResultsForReflection.length > 0 && iteration < this.maxIterations) {
@@ -192,13 +228,14 @@ export class AgentLoop {
   private async callProviderWithRetry(
     messages: Message[],
     tools: ToolDefinition[],
-    iteration: number
+    iteration: number,
+    options?: CompletionOptions
   ): Promise<LlmResponse | null> {
     for (let attempt = 0; attempt <= MAX_PROVIDER_RETRIES; attempt++) {
       const providerStart = Date.now();
       try {
         const response: LlmResponse = await Promise.race([
-          this.provider.complete(messages, tools),
+          this.provider.complete(messages, tools, options),
           this.timeout<LlmResponse>(ITERATION_TIMEOUT_MS, `Provider call timeout (${ITERATION_TIMEOUT_MS}ms)`),
         ]);
 
