@@ -8,7 +8,7 @@
   },
   "scripts": {
     "dev": "nodemon --exec ts-node src/main.ts",
-    "build": "tsc",
+    "build": "tsc && node -e \"const fs=require('fs'),p=require('path');const s=p.join('src','admin','public'),d=p.join('dist','admin','public');fs.mkdirSync(d,{recursive:true});fs.readdirSync(s).forEach(f=>fs.copyFileSync(p.join(s,f),p.join(d,f)));console.log('Copied public assets to dist/')\"",
     "start": "node dist/main.js",
     "pm2:start": "pm2 start ecosystem.config.js",
     "pm2:stop": "pm2 stop bollaclaw",
