@@ -42,10 +42,12 @@ export interface SkillMeta {
     authType?: 'bearer' | 'api_key' | 'basic' | 'none';
     envVars?: string[];   // Required env vars for this skill
   };
-  // Triggers — keywords/patterns for better routing
+  // Triggers — keywords/patterns (legacy, kept for backward compat)
   triggers?: string[];
   // Tags for categorization
   tags?: string[];
+  // If true, skill is not shown in model prompt (still user-invocable)
+  disableModelInvocation?: boolean;
 }
 
 export interface SkillToolDefinition {

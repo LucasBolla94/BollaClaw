@@ -235,19 +235,22 @@ Data/hora atual: ${now}`;
       logger.warn(`Semantic context retrieval failed (non-critical): ${err}`);
     }
 
-    // Route to skill if applicable (uses router provider — cheap/fast)
+    // ── Inject skills list into system prompt (OpenClaw-style) ──
+    // Compact XML list of all eligible skills. The main LLM decides
+    // which skill to use — no extra routing LLM call needed.
+    // The model reads the full SKILL.md via read_file when it needs
+    // detailed instructions for a specific skill.
     if (this.skills.length > 0) {
-      try {
-        const routerProvider = ProviderFactory.createRouter();
-        const router = new SkillRouter(routerProvider);
-        const skill = await router.route(userMessage, this.skills);
+      const skillsXml = SkillRouter.formatSkillsForPrompt(this.skills);
+      if (skillsXml) {
+        systemPrompt += `\n\nYou have access to skills that extend your capabilities. When a user request matches a skill's description, use the skill's tools directly. If you need detailed instructions, read the skill's SKILL.md at the location path using read_file.
 
-        if (skill) {
-          systemPrompt = this.buildSkillPrompt(systemPrompt, skill);
-          logger.info(`Using skill: ${skill.name} (executable: ${skill.isExecutable})`);
-        }
-      } catch (err) {
-        logger.warn(`Skill routing failed (using no skill): ${err}`);
+IMPORTANT RULES FOR FILE DELIVERY:
+- When you create a file using create_file or any document tool (create_pdf, create_docx, create_xlsx), you MUST include [FILE:filepath] in your final response
+- The [FILE:filepath] tag triggers automatic file delivery to the user via Telegram
+- Example: "Here is your document! [FILE:./output/report.pdf]"
+- NEVER just describe the file — always send it with [FILE:path]`;
+        systemPrompt += skillsXml;
       }
     }
 
@@ -333,29 +336,7 @@ Data/hora atual: ${now}`;
     }
   }
 
-  private buildSkillPrompt(basePrompt: string, skill: Skill): string {
-    let prompt = `${basePrompt}\n\n## Skill Ativa: ${skill.name}\n`;
-    prompt += skill.content;
-
-    if (skill.isExecutable) {
-      prompt += `\n\n### Execução\n`;
-      prompt += `Esta skill tem scripts executáveis (runtime: ${skill.runtime ?? 'auto'}).\n`;
-
-      if (skill.tools.length > 0) {
-        prompt += `\nFerramentas desta skill:\n`;
-        for (const tool of skill.tools) {
-          prompt += `- **${tool.name}**: ${tool.description}\n`;
-        }
-        prompt += `\nUse estas ferramentas quando a tarefa exigir. Elas executam scripts reais no servidor.\n`;
-      }
-
-      if (skill.api?.baseUrl) {
-        prompt += `\nAPI base: ${skill.api.baseUrl}\n`;
-      }
-    }
-
-    return prompt;
-  }
+  // buildSkillPrompt removed — replaced by SkillRouter.formatSkillsForPrompt + buildSkillInstructions
 
   reloadSkills(): void {
     const builtinTools = ['create_file', 'read_file', 'get_datetime', 'create_skill', 'list_skills', 'delete_skill', 'validate_skill', 'shell_exec', 'run_code', 'memory_search'];

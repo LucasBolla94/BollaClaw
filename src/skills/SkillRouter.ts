@@ -1,109 +1,99 @@
-import { ILlmProvider } from '../providers/ILlmProvider';
 import { Skill } from './SkillLoader';
 import { logger } from '../utils/logger';
 
+// ============================================================
+// SkillRouter v2 — OpenClaw-style: No triggers, no extra LLM call
+// ============================================================
+// Instead of routing to a single skill, we inject ALL eligible
+// skills as a compact XML list into the system prompt. The main
+// LLM decides which skill to use based on descriptions.
+//
+// This approach:
+//   1. Costs ZERO extra LLM calls (no router call)
+//   2. Is more accurate (main LLM sees full context + skills)
+//   3. Allows multi-skill usage in one conversation
+//   4. Is simpler to maintain
+// ============================================================
+
 export class SkillRouter {
-  constructor(private provider: ILlmProvider) {}
+  /**
+   * Format all eligible skills as XML for system prompt injection.
+   * The model reads this list and decides which skill to invoke.
+   *
+   * Format:
+   * <available_skills>
+   *   <skill>
+   *     <name>document-creator</name>
+   *     <description>Creates PDF, DOCX, XLSX documents</description>
+   *     <tools>create_pdf, create_docx, create_xlsx</tools>
+   *   </skill>
+   *   ...
+   * </available_skills>
+   */
+  static formatSkillsForPrompt(skills: Skill[]): string {
+    if (skills.length === 0) return '';
 
-  async route(userMessage: string, skills: Skill[]): Promise<Skill | null> {
-    if (skills.length === 0) return null;
+    const skillEntries = skills
+      .filter(s => !s.disableModelInvocation)  // Respect opt-out flag
+      .map(skill => {
+        const toolList = skill.tools.length > 0
+          ? `\n    <tools>${skill.tools.map(t => t.name).join(', ')}</tools>`
+          : '';
 
-    // Phase 1: Fast local trigger matching (no LLM call)
-    const triggerMatch = this.matchByTriggers(userMessage, skills);
-    if (triggerMatch) {
-      logger.info(`SkillRouter: trigger match → ${triggerMatch.name}`);
-      return triggerMatch;
-    }
+        return `  <skill>
+    <name>${escapeXml(skill.name)}</name>
+    <description>${escapeXml(skill.description)}</description>${toolList}
+    <location>${escapeXml(skill.dirPath)}</location>
+  </skill>`;
+      });
 
-    // Phase 2: LLM-based semantic routing
-    return this.routeWithLlm(userMessage, skills);
+    if (skillEntries.length === 0) return '';
+
+    logger.debug(`SkillRouter: ${skillEntries.length} skills formatted for prompt`);
+
+    return `\n<available_skills>
+${skillEntries.join('\n')}
+</available_skills>`;
   }
 
   /**
-   * Fast keyword/trigger matching — avoids an LLM call for obvious matches
+   * Build the full skill instructions prompt for a specific skill.
+   * Called when the model decides to use a skill — the skill's full
+   * SKILL.md content is injected as context.
    */
-  private matchByTriggers(userMessage: string, skills: Skill[]): Skill | null {
-    const messageLower = userMessage.toLowerCase();
+  static buildSkillInstructions(skill: Skill): string {
+    let prompt = `\n\n## Active Skill: ${skill.name}\n\n`;
+    prompt += skill.content;
 
-    let bestMatch: Skill | null = null;
-    let bestScore = 0;
+    if (skill.isExecutable) {
+      prompt += `\n\n### Execution\n`;
+      prompt += `This skill has executable scripts (runtime: ${skill.runtime ?? 'auto'}).\n`;
 
-    for (const skill of skills) {
-      const triggers = skill.triggers ?? [];
-      if (triggers.length === 0) continue;
-
-      let score = 0;
-      for (const trigger of triggers) {
-        if (messageLower.includes(trigger.toLowerCase())) {
-          score++;
+      if (skill.tools.length > 0) {
+        prompt += `\nAvailable tools from this skill:\n`;
+        for (const tool of skill.tools) {
+          prompt += `- **${tool.name}**: ${tool.description}\n`;
         }
+        prompt += `\nUse these tools when the task requires them. They execute real scripts on the server.\n`;
       }
 
-      if (score > bestScore) {
-        bestScore = score;
-        bestMatch = skill;
+      if (skill.api?.baseUrl) {
+        prompt += `\nAPI base: ${skill.api.baseUrl}\n`;
       }
     }
 
-    // Require at least 1 trigger match
-    return bestScore > 0 ? bestMatch : null;
+    return prompt;
   }
+}
 
-  /**
-   * LLM-based routing for when triggers don't match
-   */
-  private async routeWithLlm(userMessage: string, skills: Skill[]): Promise<Skill | null> {
-    const skillList = skills
-      .map((s) => {
-        const parts = [`- name: "${s.name}" | description: "${s.description}"`];
-        if (s.tags && s.tags.length > 0) {
-          parts.push(`  tags: ${s.tags.join(', ')}`);
-        }
-        if (s.isExecutable) {
-          parts.push(`  type: executable (has scripts/tools)`);
-        }
-        return parts.join('\n');
-      })
-      .join('\n');
-
-    const systemPrompt = `You are a skill router. Your ONLY job is to decide which skill (if any) should handle the user's message.
-
-Rules:
-- Choose the skill that BEST matches the user's intent
-- If NO skill is a good match, return null
-- Consider the skill description, tags, and whether it's executable
-- Respond with ONLY valid JSON: {"skillName": "skill-name-here"} or {"skillName": null}
-- No explanation, just JSON.`;
-
-    const userPrompt = `Available skills:\n${skillList}\n\nUser message: "${userMessage}"\n\nWhich skill should handle this? JSON only.`;
-
-    try {
-      const response = await this.provider.complete([
-        { role: 'system', content: systemPrompt },
-        { role: 'user', content: userPrompt },
-      ]);
-
-      const raw = response.content?.trim() ?? '';
-      const jsonMatch = raw.match(/\{[\s\S]*\}/);
-      if (!jsonMatch) return null;
-
-      const parsed = JSON.parse(jsonMatch[0]) as { skillName: string | null };
-      if (!parsed.skillName) return null;
-
-      const skill = skills.find(
-        (s) => s.name === parsed.skillName || s.dirName === parsed.skillName
-      );
-
-      if (skill) {
-        logger.info(`SkillRouter: LLM selected → ${skill.name}`);
-      } else {
-        logger.debug(`SkillRouter: LLM returned unknown skill: ${parsed.skillName}`);
-      }
-
-      return skill ?? null;
-    } catch (err) {
-      logger.warn(`SkillRouter failed, using no skill: ${err}`);
-      return null;
-    }
-  }
+/**
+ * Escape special XML characters
+ */
+function escapeXml(str: string): string {
+  return str
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&apos;');
 }
