@@ -575,16 +575,49 @@ async function cmdUpdate(_args: string[]) {
 
     // ── Step 6: Verify build ───────────────────────────────
     console.log(`  ${DIM}├─${NC} [5/6] Verificando build...`);
-    const mainJs = path.join(projectRoot, 'dist', 'main.js');
+    console.log(`  ${DIM}│  ${NC}  ${DIM}projectRoot: ${projectRoot}${NC}`);
+
+    // Check main entry from package.json, fallback to dist/main.js
+    let mainJs = path.join(projectRoot, 'dist', 'main.js');
+    try {
+      const pkg = JSON.parse(fs.readFileSync(path.join(projectRoot, 'package.json'), 'utf-8'));
+      if (pkg.main) {
+        mainJs = path.join(projectRoot, pkg.main);
+      }
+    } catch { /* use default */ }
+
     if (!fs.existsSync(mainJs)) {
-      throw new Error('Verificação falhou: dist/main.js não encontrado após build');
+      // Debug: show what IS in dist/
+      const distDir = path.join(projectRoot, 'dist');
+      if (fs.existsSync(distDir)) {
+        try {
+          const files = fs.readdirSync(distDir).slice(0, 10);
+          console.log(`  ${DIM}│  ${NC}  ${Y}dist/ contém: ${files.join(', ')}${NC}`);
+        } catch { /* ignore */ }
+      } else {
+        console.log(`  ${DIM}│  ${NC}  ${Y}dist/ não existe em ${projectRoot}${NC}`);
+        // Try to find where tsc actually output
+        try {
+          const findResult = cliExec('find . -name "main.js" -path "*/dist/*" -type f 2>/dev/null | head -5', 10_000);
+          if (findResult.trim()) {
+            console.log(`  ${DIM}│  ${NC}  ${Y}Encontrado em: ${findResult.trim()}${NC}`);
+            // Use the first found main.js
+            const found = findResult.trim().split('\n')[0];
+            mainJs = path.resolve(projectRoot, found);
+          }
+        } catch { /* ignore */ }
+      }
     }
-    // Check file isn't empty
+
+    if (!fs.existsSync(mainJs)) {
+      throw new Error(`Verificação falhou: ${mainJs} não encontrado após build. projectRoot=${projectRoot}`);
+    }
+
     const stat = fs.statSync(mainJs);
     if (stat.size < 100) {
-      throw new Error(`Verificação falhou: dist/main.js muito pequeno (${stat.size} bytes)`);
+      throw new Error(`Verificação falhou: ${path.basename(mainJs)} muito pequeno (${stat.size} bytes)`);
     }
-    console.log(`  ${DIM}│  ${NC}  ${G}✔ dist/main.js verificado (${Math.round(stat.size / 1024)}KB)${NC}`);
+    console.log(`  ${DIM}│  ${NC}  ${G}✔ ${path.relative(projectRoot, mainJs)} verificado (${Math.round(stat.size / 1024)}KB)${NC}`);
 
     // ── Step 7: PM2 restart ────────────────────────────────
     const newCommit = cliGit('rev-parse HEAD').trim();

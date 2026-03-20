@@ -211,11 +211,25 @@ export class AutoUpdater {
       this.execCmd('npm run build 2>&1');
 
       // Step 5: Verify build output exists
-      const mainJs = path.join(this.config.repoDir, 'dist', 'main.js');
+      let mainJs = path.join(this.config.repoDir, 'dist', 'main.js');
+      try {
+        const pkg = JSON.parse(fs.readFileSync(path.join(this.config.repoDir, 'package.json'), 'utf-8'));
+        if (pkg.main) mainJs = path.join(this.config.repoDir, pkg.main);
+      } catch { /* use default */ }
+
       if (!fs.existsSync(mainJs)) {
-        throw new Error('Build verification failed: dist/main.js not found');
+        // Fallback: search for main.js in dist/
+        const distDir = path.join(this.config.repoDir, 'dist');
+        if (fs.existsSync(distDir)) {
+          const found = this.findFile(distDir, 'main.js');
+          if (found) mainJs = found;
+        }
       }
-      logger.info('[AutoUpdater] [5/6] Build verified');
+
+      if (!fs.existsSync(mainJs)) {
+        throw new Error(`Build verification failed: main.js not found (looked at ${mainJs})`);
+      }
+      logger.info(`[AutoUpdater] [5/6] Build verified: ${mainJs}`);
 
       // Step 6: Schedule graceful restart
       this.status.currentCommit = this.getCurrentCommit();
@@ -414,6 +428,21 @@ export class AutoUpdater {
       encoding: 'utf-8',
       timeout: 30_000,
     });
+  }
+
+  private findFile(dir: string, filename: string): string | null {
+    try {
+      const entries = fs.readdirSync(dir, { withFileTypes: true });
+      for (const entry of entries) {
+        const full = path.join(dir, entry.name);
+        if (entry.isFile() && entry.name === filename) return full;
+        if (entry.isDirectory() && entry.name !== 'node_modules') {
+          const found = this.findFile(full, filename);
+          if (found) return found;
+        }
+      }
+    } catch { /* ignore */ }
+    return null;
   }
 
   private execCmd(cmd: string): string {
