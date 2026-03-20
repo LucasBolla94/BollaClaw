@@ -266,6 +266,28 @@ fi
 # ══════════════════════════════════════════════════════════════
 step_header "Código-fonte BollaClaw" "📂"
 
+# ── Ensure install directory is writable ───────────────────────
+# /opt requires sudo — create dir and set ownership to current user
+ensure_install_dir() {
+  local dir="$1"
+  local parent="$(dirname "$dir")"
+
+  if [ -d "$dir" ] && [ -w "$dir" ]; then
+    return 0  # Already exists and writable
+  fi
+
+  if [ ! -d "$dir" ]; then
+    if [ -w "$parent" ]; then
+      mkdir -p "$dir"
+    else
+      sudo mkdir -p "$dir"
+      sudo chown "$(whoami):$(id -gn)" "$dir"
+    fi
+  elif [ ! -w "$dir" ]; then
+    sudo chown -R "$(whoami):$(id -gn)" "$dir"
+  fi
+}
+
 # ── Detect and migrate old installations ──────────────────────
 OLD_DIRS=("$HOME/bollaclaw" "$HOME/BollaClaw" "$HOME/BollaClaw/bollaclaw")
 for OLD_DIR in "${OLD_DIRS[@]}"; do
@@ -277,13 +299,14 @@ for OLD_DIR in "${OLD_DIRS[@]}"; do
     pm2 stop bollaclaw 2>/dev/null || true
     pm2 delete bollaclaw 2>/dev/null || true
 
+    # Ensure target dir exists
+    ensure_install_dir "$INSTALL_DIR"
+
     # Copy .env and data if they exist (preserve user config)
     if [ -f "$OLD_DIR/.env" ] && [ ! -f "$INSTALL_DIR/.env" ]; then
-      mkdir -p "$INSTALL_DIR"
       cp "$OLD_DIR/.env" "$INSTALL_DIR/.env" 2>/dev/null && ok "Migrado: .env"
     fi
     if [ -d "$OLD_DIR/data" ] && [ ! -d "$INSTALL_DIR/data" ]; then
-      mkdir -p "$INSTALL_DIR"
       cp -r "$OLD_DIR/data" "$INSTALL_DIR/data" 2>/dev/null && ok "Migrado: data/"
     fi
 
@@ -308,6 +331,7 @@ elif [ -d "$INSTALL_DIR/.git" ]; then
     warn "Conflito no git — fazendo backup e re-clone..."
     cd /tmp
     mv "$INSTALL_DIR" "${INSTALL_DIR}.bak.$(date +%s)" 2>/dev/null || true
+    ensure_install_dir "$INSTALL_DIR"
     run_step "Clonando repositório" git clone --quiet "$REPO_URL" "$INSTALL_DIR"
     cd "$INSTALL_DIR"
   }
@@ -315,8 +339,12 @@ elif [ -d "$INSTALL_DIR" ] && [ -f "$INSTALL_DIR/package.json" ]; then
   ok "Diretório existente: ${C}$INSTALL_DIR${NC}"
   cd "$INSTALL_DIR"
 else
-  mkdir -p "$(dirname "$INSTALL_DIR")"
+  ensure_install_dir "$(dirname "$INSTALL_DIR")"
   run_step "Clonando repositório" git clone --quiet "$REPO_URL" "$INSTALL_DIR"
+  # Ensure ownership after clone
+  if [ ! -w "$INSTALL_DIR" ]; then
+    sudo chown -R "$(whoami):$(id -gn)" "$INSTALL_DIR"
+  fi
   cd "$INSTALL_DIR"
 fi
 
