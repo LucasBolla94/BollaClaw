@@ -10,7 +10,9 @@ import * as readline from 'readline';
 import * as crypto from 'crypto';
 
 // Load .env from the bollaclaw directory
-const projectRoot = path.resolve(__dirname, '..');
+// __dirname is dist/bin/ when compiled, so we go up 2 levels to reach project root
+// In dev (ts-node), __dirname is src/bin/, also 2 levels up
+const projectRoot = path.resolve(__dirname, '..', '..');
 dotenv.config({ path: path.join(projectRoot, '.env') });
 
 import { UserManager } from '../auth/UserManager';
